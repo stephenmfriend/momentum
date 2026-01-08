@@ -1,0 +1,29 @@
+# Binaries for programs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, can be ignored with "go test -c -o bin/testname"
+# comment out to commit test binaries to repo (e.g. for CI/CD)
+# *.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories (remove the "vendor/" prefix as of Go 1.14)
+vendor/
+
+# Go work files
+go.work.sum
+# go.work # if you are working locally and do not want to share this file
+
+# Editor-specific files might go here, e.g. for VS Code
+# .vscode/
+
+# Project-specific build output directory (commonly used)
+/bin
+/dist
+
+.claude/
