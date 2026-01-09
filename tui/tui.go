@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/stevegrehan/momentum/agent"
 	"github.com/stevegrehan/momentum/client"
+	"github.com/stevegrehan/momentum/sse"
 )
 
 // Color palette
@@ -233,6 +235,11 @@ type Model struct {
 
 	// Agent state
 	agentState *AgentState
+
+	// SSE subscriber for watching task changes
+	sseSubscriber *sse.Subscriber
+	sseEvents     <-chan sse.Event
+	watching      bool
 }
 
 // NewModel creates a new TUI model
@@ -275,6 +282,9 @@ func NewModel(baseURL string) Model {
 	taskList.SetFilteringEnabled(true)
 	taskList.Styles.NoItems = emptyStyle
 
+	// Create SSE subscriber
+	subscriber := sse.NewSubscriber(baseURL)
+
 	return Model{
 		client:        client.NewClient(baseURL),
 		spinner:       s,
@@ -286,6 +296,7 @@ func NewModel(baseURL string) Model {
 		focusedPane:   PaneProjects,
 		loading:       true,
 		agentState:    NewAgentState(),
+		sseSubscriber: subscriber,
 	}
 }
 
@@ -336,9 +347,62 @@ type agentErrorMsg struct {
 	err    error
 }
 
+// Tick message for periodic task watching (like bubbletea eyes example)
+type tickMsg time.Time
+
+// SSE event message
+type sseEventMsg struct {
+	event sse.Event
+}
+
 // Init starts the TUI
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.loadProjects())
+	return tea.Batch(m.spinner.Tick, m.loadProjects(), m.startWatching())
+}
+
+// tickCmd returns a command that ticks every 100ms (like bubbletea eyes example)
+func tickCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+// startWatching starts the SSE subscriber and returns a command to begin watching
+func (m *Model) startWatching() tea.Cmd {
+	if m.watching {
+		return nil
+	}
+
+	// Start SSE subscriber
+	ctx := context.Background()
+	m.sseEvents = m.sseSubscriber.Start(ctx)
+	m.watching = true
+
+	return tickCmd()
+}
+
+// checkSSEEvents is called on each tick to check for new SSE events
+func (m *Model) checkSSEEvents() tea.Cmd {
+	if m.sseEvents == nil {
+		return nil
+	}
+
+	// Non-blocking check for SSE events
+	select {
+	case event, ok := <-m.sseEvents:
+		if !ok {
+			// Channel closed, subscriber stopped
+			m.watching = false
+			m.sseEvents = nil
+			return nil
+		}
+		return func() tea.Msg {
+			return sseEventMsg{event: event}
+		}
+	default:
+		// No event available
+		return nil
+	}
 }
 
 func (m Model) loadProjects() tea.Cmd {
@@ -530,6 +594,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 
+	case tickMsg:
+		// Check for SSE events on each tick (like the eyes example checks for blink timing)
+		var cmds []tea.Cmd
+		cmds = append(cmds, tickCmd()) // Continue ticking
+
+		if sseCmd := m.checkSSEEvents(); sseCmd != nil {
+			cmds = append(cmds, sseCmd)
+		}
+		return m, tea.Batch(cmds...)
+
+	case sseEventMsg:
+		// Handle SSE event - refresh data when tasks change
+		if msg.event.Type == "data-changed" ||
+			msg.event.Type == "task.created" ||
+			msg.event.Type == "task.updated" ||
+			msg.event.Type == "task.status_changed" ||
+			msg.event.Type == "task.deleted" {
+			return m, tea.Batch(m.loadProjects(), m.loadTasks())
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.isFiltering() {
 			return m.updateFocusedList(msg)
@@ -706,11 +791,19 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.agentState.IsRunning() {
 			return m, m.cancelAgent()
 		}
+		// Stop SSE subscriber before quitting
+		if m.sseSubscriber != nil {
+			m.sseSubscriber.Stop()
+		}
 		return m, tea.Quit
 
 	case "q":
 		// Only quit if agent is not running
 		if !m.agentState.IsRunning() {
+			// Stop SSE subscriber before quitting
+			if m.sseSubscriber != nil {
+				m.sseSubscriber.Stop()
+			}
 			return m, tea.Quit
 		}
 		return m, nil
@@ -924,6 +1017,9 @@ func (m Model) View() string {
 
 	// Status bar
 	var statusParts []string
+	if m.watching {
+		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(green).Render("◉ watching"))
+	}
 	if m.statusFilter != FilterAll {
 		statusParts = append(statusParts, fmt.Sprintf("Filter: %s", m.statusFilter.Label()))
 	}

@@ -188,37 +188,15 @@ func (s *Selector) selectBestTask(tasks []client.Task) (*client.Task, error) {
 
 // filterAndSortTasks filters tasks to only include unblocked todos
 // and sorts them by priority (newer first).
+// Only tasks with status "todo" and blocked=false are eligible.
 func filterAndSortTasks(tasks []client.Task) []client.Task {
 	var candidates []client.Task
 
-	// First pass: collect unblocked todo tasks
+	// Only collect unblocked todo tasks - no fallbacks
 	for _, task := range tasks {
 		if !task.Blocked && task.Status == "todo" {
 			candidates = append(candidates, task)
 		}
-	}
-
-	// If no unblocked todos, try unblocked tasks of any status
-	if len(candidates) == 0 {
-		for _, task := range tasks {
-			if !task.Blocked {
-				candidates = append(candidates, task)
-			}
-		}
-	}
-
-	// If still no candidates, try any todo tasks (even blocked)
-	if len(candidates) == 0 {
-		for _, task := range tasks {
-			if task.Status == "todo" {
-				candidates = append(candidates, task)
-			}
-		}
-	}
-
-	// Last resort: take any task
-	if len(candidates) == 0 {
-		candidates = tasks
 	}
 
 	// Sort by ID descending (assuming newer tasks have "larger" IDs)

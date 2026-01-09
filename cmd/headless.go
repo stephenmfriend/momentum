@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stevegrehan/momentum/agent"
 	"github.com/stevegrehan/momentum/client"
 	"github.com/stevegrehan/momentum/selection"
+	"github.com/stevegrehan/momentum/sse"
 	"github.com/stevegrehan/momentum/workflow"
 )
 
@@ -67,6 +71,9 @@ func init() {
 	headlessCmd.Flags().StringVar(&projectID, "project", "", "Project ID to work with")
 }
 
+// eyesFrames are the animation frames for the watching indicator
+var eyesFrames = []string{"◐", "◓", "◑", "◒"}
+
 // runHeadless executes the headless mode logic
 func runHeadless() error {
 	fmt.Printf("Running in headless mode...\n")
@@ -94,91 +101,175 @@ func runHeadless() error {
 	}
 	fmt.Println()
 
-	// Select a task
-	task, err := selector.SelectTask()
-	if err != nil {
-		if errors.Is(err, selection.ErrNoTaskAvailable) {
-			fmt.Println("No task available matching the selection criteria.")
-			return nil
-		}
-		return fmt.Errorf("failed to select task: %w", err)
-	}
+	// Setup signal handling for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Print the selected task details
-	fmt.Println("Selected task:")
-	fmt.Println("==============")
-	fmt.Printf("  ID:        %s\n", task.ID)
-	fmt.Printf("  Title:     %s\n", task.Title)
-	fmt.Printf("  Status:    %s\n", task.Status)
-	fmt.Printf("  Blocked:   %t\n", task.Blocked)
-	fmt.Printf("  Project:   %s\n", task.ProjectID)
-	if task.EpicID != "" {
-		fmt.Printf("  Epic:      %s\n", task.EpicID)
-	}
-	if task.Notes != "" {
-		fmt.Printf("  Notes:     %s\n", task.Notes)
-	}
-	if len(task.DependsOn) > 0 {
-		fmt.Printf("  Depends on: %v\n", task.DependsOn)
-	}
-	fmt.Println()
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Mark task as in_progress
-	fmt.Printf("Starting task %s...\n", task.ID)
-	if err := wf.StartWorking([]string{task.ID}); err != nil {
-		return fmt.Errorf("failed to start task: %w", err)
-	}
-
-	// Build prompt for the agent
-	prompt := buildHeadlessPrompt(task)
-
-	// Create and run agent
-	fmt.Println("Spawning Claude Code agent...")
-	fmt.Println()
-
-	ag := agent.NewClaudeCode(agent.Config{
-		WorkDir: ".",
-	})
-
-	runner := agent.NewRunner(ag)
-
-	ctx := context.Background()
-	if err := runner.Run(ctx, prompt); err != nil {
-		return fmt.Errorf("failed to start agent: %w", err)
-	}
-
-	// Stream output to console
 	go func() {
-		for line := range runner.Output() {
-			if line.IsStderr {
-				fmt.Fprintf(os.Stderr, "%s\n", line.Text)
-			} else {
-				fmt.Println(line.Text)
-			}
-		}
+		<-sigChan
+		fmt.Println("\nShutting down...")
+		cancel()
 	}()
 
-	// Wait for completion
-	result := <-runner.Done()
+	// Start SSE subscriber for live updates
+	subscriber := sse.NewSubscriber(GetBaseURL())
+	sseEvents := subscriber.Start(ctx)
+	defer subscriber.Stop()
 
-	fmt.Println()
-	if result.ExitCode == 0 {
-		fmt.Printf("Agent completed successfully in %v\n", result.Duration)
-
-		// Mark task as done
-		if err := wf.MarkComplete([]string{task.ID}); err != nil {
-			return fmt.Errorf("failed to mark task complete: %w", err)
+	// Main loop - keep looking for tasks
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
 		}
-		fmt.Printf("Task %s marked as done.\n", task.ID)
-	} else {
-		fmt.Printf("Agent failed with exit code %d\n", result.ExitCode)
-		fmt.Printf("Task %s remains in progress for investigation.\n", task.ID)
-		if result.Error != nil {
-			return result.Error
+
+		// Select a task
+		task, err := selector.SelectTask()
+		if err != nil {
+			if errors.Is(err, selection.ErrNoTaskAvailable) {
+				// No task available - wait and watch for new tasks
+				if err := waitForTask(ctx, sseEvents, selector); err != nil {
+					if errors.Is(err, context.Canceled) {
+						return nil
+					}
+					return err
+				}
+				continue // Task became available, loop back to select it
+			}
+			return fmt.Errorf("failed to select task: %w", err)
+		}
+
+		// Print the selected task details
+		fmt.Println("Selected task:")
+		fmt.Println("==============")
+		fmt.Printf("  ID:        %s\n", task.ID)
+		fmt.Printf("  Title:     %s\n", task.Title)
+		fmt.Printf("  Status:    %s\n", task.Status)
+		fmt.Printf("  Blocked:   %t\n", task.Blocked)
+		fmt.Printf("  Project:   %s\n", task.ProjectID)
+		if task.EpicID != "" {
+			fmt.Printf("  Epic:      %s\n", task.EpicID)
+		}
+		if task.Notes != "" {
+			fmt.Printf("  Notes:     %s\n", task.Notes)
+		}
+		if len(task.DependsOn) > 0 {
+			fmt.Printf("  Depends on: %v\n", task.DependsOn)
+		}
+		fmt.Println()
+
+		// Mark task as in_progress
+		fmt.Printf("Starting task %s...\n", task.ID)
+		if err := wf.StartWorking([]string{task.ID}); err != nil {
+			return fmt.Errorf("failed to start task: %w", err)
+		}
+
+		// Build prompt for the agent
+		prompt := buildHeadlessPrompt(task)
+
+		// Create and run agent
+		fmt.Println("Spawning Claude Code agent...")
+		fmt.Println()
+
+		ag := agent.NewClaudeCode(agent.Config{
+			WorkDir: ".",
+		})
+
+		runner := agent.NewRunner(ag)
+
+		if err := runner.Run(ctx, prompt); err != nil {
+			return fmt.Errorf("failed to start agent: %w", err)
+		}
+
+		// Stream output to console
+		go func() {
+			for line := range runner.Output() {
+				if line.IsStderr {
+					fmt.Fprintf(os.Stderr, "%s\n", line.Text)
+				} else {
+					fmt.Println(line.Text)
+				}
+			}
+		}()
+
+		// Wait for completion
+		result := <-runner.Done()
+
+		fmt.Println()
+		if result.ExitCode == 0 {
+			fmt.Printf("Agent completed successfully in %v\n", result.Duration)
+
+			// Mark task as done
+			if err := wf.MarkComplete([]string{task.ID}); err != nil {
+				return fmt.Errorf("failed to mark task complete: %w", err)
+			}
+			fmt.Printf("Task %s marked as done.\n", task.ID)
+		} else {
+			fmt.Printf("Agent failed with exit code %d\n", result.ExitCode)
+			fmt.Printf("Task %s remains in progress for investigation.\n", task.ID)
+			if result.Error != nil {
+				return result.Error
+			}
+		}
+
+		fmt.Println()
+		fmt.Println("Task completed. Looking for next task...")
+		fmt.Println()
+	}
+}
+
+// waitForTask waits for a task to become available, showing an animated indicator
+func waitForTask(ctx context.Context, sseEvents <-chan sse.Event, selector *selection.Selector) error {
+	fmt.Print("Watching for tasks... ")
+
+	frameIdx := 0
+	ticker := time.NewTicker(150 * time.Millisecond)
+	defer ticker.Stop()
+
+	// Poll interval for checking tasks (in case SSE misses something)
+	pollTicker := time.NewTicker(5 * time.Second)
+	defer pollTicker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println() // Clear the line
+			return ctx.Err()
+
+		case event, ok := <-sseEvents:
+			if !ok {
+				// SSE channel closed, fall back to polling
+				continue
+			}
+			// Check if this is a task-related event
+			if event.Type == "task.created" ||
+				event.Type == "task.updated" ||
+				event.Type == "task.status_changed" ||
+				event.Type == "data-changed" {
+				// Check if a task is now available
+				if _, err := selector.SelectTask(); err == nil {
+					fmt.Println("\r\033[K") // Clear the line
+					return nil
+				}
+			}
+
+		case <-pollTicker.C:
+			// Periodic poll in case SSE missed an event
+			if _, err := selector.SelectTask(); err == nil {
+				fmt.Println("\r\033[K") // Clear the line
+				return nil
+			}
+
+		case <-ticker.C:
+			// Animate the eyes
+			fmt.Printf("\rWatching for tasks... %s ", eyesFrames[frameIdx])
+			frameIdx = (frameIdx + 1) % len(eyesFrames)
 		}
 	}
-
-	return nil
 }
 
 // buildHeadlessPrompt constructs the prompt for the agent in headless mode

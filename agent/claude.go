@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -57,6 +58,9 @@ func (c *ClaudeCode) Start(ctx context.Context, prompt string) error {
 		"--dangerously-skip-permissions",
 		prompt,
 	)
+
+	// Create a new process group so we can signal all children
+	c.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	// Set working directory
 	if c.config.WorkDir != "" {
@@ -133,13 +137,19 @@ func (c *ClaudeCode) Cancel() error {
 		return nil
 	}
 
-	// First try SIGINT for graceful shutdown
-	if err := c.cmd.Process.Signal(os.Interrupt); err != nil {
-		// If SIGINT fails, force kill
-		return c.cmd.Process.Kill()
+	// Cancel the context first - this signals exec.CommandContext to kill the process
+	if c.cancel != nil {
+		c.cancel()
 	}
 
-	// Give it 5 seconds to shutdown gracefully
+	// Also send SIGINT to process group for graceful shutdown of any children
+	// Use negative PID to signal the process group
+	if err := syscall.Kill(-c.cmd.Process.Pid, syscall.SIGINT); err != nil {
+		// If process group signal fails, try direct signal
+		c.cmd.Process.Signal(os.Interrupt)
+	}
+
+	// Give it 3 seconds to shutdown gracefully, then force kill
 	done := make(chan struct{})
 	go func() {
 		c.cmd.Wait()
@@ -149,7 +159,9 @@ func (c *ClaudeCode) Cancel() error {
 	select {
 	case <-done:
 		return nil
-	case <-time.After(5 * time.Second):
+	case <-time.After(3 * time.Second):
+		// Force kill the process group
+		syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
 		return c.cmd.Process.Kill()
 	}
 }
