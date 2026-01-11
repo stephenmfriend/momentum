@@ -65,10 +65,26 @@ jobs:
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
         run: |
+          # Capture the tag before semantic-release
+          OLD_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
+
           npx semantic-release
-          # Check if a new version was released by looking for the tag
-          NEW_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+
+          # Fetch new tags and check if a new one was created
+          git fetch --tags
+          NEW_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
+
+          if [ "$NEW_TAG" != "$OLD_TAG" ] && [ "$NEW_TAG" != "none" ]; then
+            echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+            echo "New release tag: $NEW_TAG"
+          else
+            echo "No new release"
+          fi
+
+      - name: Checkout release tag
+        if: steps.semantic.outputs.new_tag != ''
+        run: |
+          git checkout ${{ steps.semantic.outputs.new_tag }}
 
       - name: Run GoReleaser
         if: steps.semantic.outputs.new_tag != ''
