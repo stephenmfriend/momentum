@@ -1,3 +1,14 @@
+## [1.1.0](https://github.com/sirsjg/momentum/compare/v1.0.6...v1.1.0) (2026-01-11)
+
+### Features
+
+* adds synchronous and asynchronous execution modes ([6d4a2df](https://github.com/sirsjg/momentum/commit/6d4a2dfe8e1bc45efa66377734c2f83e2aee2195))
+
+### Documentation
+
+* features ([dfee0fc](https://github.com/sirsjg/momentum/commit/dfee0fc0441a755a6266e8b89de1b56be85bc50b))
+* sheilds ([93b79c3](https://github.com/sirsjg/momentum/commit/93b79c379e79064222e97d5abfc6c91a051efecf))
+
 ## [1.0.6](https://github.com/sirsjg/momentum/compare/v1.0.5...v1.0.6) (2026-01-11)
 
 ### Bug Fixes
