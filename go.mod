@@ -1,4 +1,4 @@
-module github.com/stevegrehan/momentum
+module github.com/sirsjg/momentum
 
 go 1.25.5
 

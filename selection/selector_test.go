@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stevegrehan/momentum/client"
+	"github.com/sirsjg/momentum/client"
 )
 
 // mockServer creates a test server that responds with the given data.
@@ -729,7 +729,7 @@ func TestFilterAndSortTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := filterAndSortTasks(tt.tasks)
+			result := filterAndSortTasks(tt.tasks, nil)
 
 			if len(result) != tt.expectedLength {
 				t.Errorf("expected %d tasks, got %d", tt.expectedLength, len(result))
@@ -749,7 +749,7 @@ func TestFilterAndSortTasks(t *testing.T) {
 }
 
 func TestFilterAndSortTasksEmpty(t *testing.T) {
-	result := filterAndSortTasks([]client.Task{})
+	result := filterAndSortTasks([]client.Task{}, nil)
 	if len(result) != 0 {
 		t.Errorf("expected empty result, got %d tasks", len(result))
 	}

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stevegrehan/momentum/client"
+	"github.com/sirsjg/momentum/client"
 )
 
 func setupTestServer(handler http.HandlerFunc) (*httptest.Server, *client.Client) {

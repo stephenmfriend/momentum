@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/stevegrehan/momentum/version"
+	"github.com/sirsjg/momentum/version"
 )
 
 var (

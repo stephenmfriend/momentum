@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/stevegrehan/momentum/agent"
-	"github.com/stevegrehan/momentum/version"
+	"github.com/sirsjg/momentum/agent"
+	"github.com/sirsjg/momentum/version"
 )
 
 // AgentUpdate represents an update from an agent

@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/stevegrehan/momentum/client"
-	"github.com/stevegrehan/momentum/sse"
+	"github.com/sirsjg/momentum/client"
+	"github.com/sirsjg/momentum/sse"
 )
 
 func TestNewRunningAgents(t *testing.T) {
