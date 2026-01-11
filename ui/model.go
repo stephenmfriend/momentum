@@ -23,19 +23,19 @@ type AgentUpdate struct {
 
 // AgentPanel represents a single agent's output panel
 type AgentPanel struct {
-	ID         string
-	TaskID     string
-	TaskTitle  string
-	AgentName  string
-	Runner     *agent.Runner
-	Output     []agent.OutputLine
-	StartTime  time.Time
-	EndTime    time.Time // Set when agent completes
-	Result     *agent.Result
-	ScrollPos  int
-	Focused    bool
-	Closed     bool
-	Stopping   bool // Set when stop is requested but process hasn't exited yet
+	ID        string
+	TaskID    string
+	TaskTitle string
+	AgentName string
+	Runner    *agent.Runner
+	Output    []agent.OutputLine
+	StartTime time.Time
+	EndTime   time.Time // Set when agent completes
+	Result    *agent.Result
+	ScrollPos int
+	Focused   bool
+	Closed    bool
+	Stopping  bool // Set when stop is requested but process hasn't exited yet
 }
 
 // IsRunning returns whether the agent is still running
@@ -62,6 +62,7 @@ type Model struct {
 	spinner      spinner.Model
 	taskCount    int
 	lastTaskTime time.Time
+	mode         ExecutionMode
 
 	// Agent panels
 	panels       []*AgentPanel
@@ -74,20 +75,23 @@ type Model struct {
 	// Update notification
 	updateAvailable bool
 	latestVersion   string
+
+	modeUpdates chan<- ExecutionMode
 }
 
-
 // NewModel creates a new TUI model
-func NewModel(criteria string) Model {
+func NewModel(criteria string, mode ExecutionMode, modeUpdates chan<- ExecutionMode) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(Purple)
 
 	return Model{
 		criteria:     criteria,
+		mode:         mode,
 		spinner:      s,
 		panels:       make([]*AgentPanel, 0),
 		agentUpdates: make(chan AgentUpdate, 100),
+		modeUpdates:  modeUpdates,
 	}
 }
 
@@ -343,6 +347,16 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case "m":
+		m.mode = m.mode.Toggle()
+		if m.modeUpdates != nil {
+			select {
+			case m.modeUpdates <- m.mode:
+			default:
+			}
+		}
+		return m, nil
 	}
 
 	return m, nil
@@ -388,6 +402,7 @@ func (m *Model) View() string {
 	// Help
 	help := HelpKeyStyle.Render("Tab") + HelpStyle.Render(" focus  ") +
 		HelpKeyStyle.Render("j/k") + HelpStyle.Render(" scroll  ") +
+		HelpKeyStyle.Render("m") + HelpStyle.Render(" mode  ") +
 		HelpKeyStyle.Render("s") + HelpStyle.Render(" stop  ") +
 		HelpKeyStyle.Render("x") + HelpStyle.Render(" close  ") +
 		HelpKeyStyle.Render("q") + HelpStyle.Render(" quit")
@@ -407,16 +422,20 @@ func (m *Model) renderListenerPanel() string {
 	if m.lastError != nil {
 		status = StatusError.Render(fmt.Sprintf("Error: %v", m.lastError))
 	} else if m.connected {
-		status = StatusConnected.Render("Connected") + " " + m.spinner.View() + " " +
-			StatusWaiting.Render("Watching for tasks...")
+		status = StatusConnected.Render("Connected and watching for tasks...") + " " + m.spinner.View()
 	} else {
 		status = m.spinner.View() + " " + StatusWaiting.Render("Connecting...")
 	}
 
-	content := fmt.Sprintf("%s\n%s: %s\nTasks completed: %d",
+	labelWidth := 16
+	labelStyle := lipgloss.NewStyle().Foreground(Gray).Width(labelWidth)
+	content := fmt.Sprintf("%s\n%s %s\n%s %s\n%s %d",
 		status,
-		lipgloss.NewStyle().Foreground(Gray).Render("Filter"),
+		labelStyle.Render("Filter:"),
 		m.criteria,
+		labelStyle.Render("Mode:"),
+		m.mode.String(),
+		labelStyle.Render("Tasks completed:"),
 		m.taskCount,
 	)
 

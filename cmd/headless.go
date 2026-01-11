@@ -30,12 +30,14 @@ type runningAgents struct {
 	mu      sync.Mutex
 	tasks   map[string]bool
 	runners map[string]*agent.Runner
+	doneCh  chan string
 }
 
 func newRunningAgents() *runningAgents {
 	return &runningAgents{
 		tasks:   make(map[string]bool),
 		runners: make(map[string]*agent.Runner),
+		doneCh:  make(chan string, 100),
 	}
 }
 
@@ -57,6 +59,10 @@ func (r *runningAgents) markDone(taskID string) {
 	defer r.mu.Unlock()
 	delete(r.tasks, taskID)
 	delete(r.runners, taskID)
+	select {
+	case r.doneCh <- taskID:
+	default:
+	}
 }
 
 func (r *runningAgents) cancelAll() {
@@ -67,6 +73,16 @@ func (r *runningAgents) cancelAll() {
 			runner.Cancel()
 		}
 	}
+}
+
+func (r *runningAgents) hasRunning() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.tasks) > 0
+}
+
+func (r *runningAgents) done() <-chan string {
+	return r.doneCh
 }
 
 // isAutoEpicEvent checks if the SSE event contains an epic with auto=true
@@ -87,11 +103,17 @@ var (
 
 // runHeadless executes the headless mode logic with TUI
 func runHeadless() error {
+	mode, err := parseExecutionMode(executionMode)
+	if err != nil {
+		return err
+	}
+
 	// Build criteria string for display
 	criteria := buildCriteriaString()
 
 	// Create the TUI model
-	model := ui.NewModel(criteria)
+	modeUpdates := make(chan ui.ExecutionMode, 10)
+	model := ui.NewModel(criteria, mode, modeUpdates)
 
 	// Create the bubbletea program
 	p := tea.NewProgram(&model, tea.WithAltScreen())
@@ -103,10 +125,10 @@ func runHeadless() error {
 	agents := newRunningAgents()
 
 	// Start the background worker
-	go runWorker(ctx, p, agents)
+	go runWorker(ctx, p, agents, mode, modeUpdates)
 
 	// Run the TUI
-	_, err := p.Run()
+	_, err = p.Run()
 
 	// Cancel all running agents and context on exit
 	agents.cancelAll()
@@ -132,8 +154,19 @@ func buildCriteriaString() string {
 	return "All projects"
 }
 
+func parseExecutionMode(value string) (ui.ExecutionMode, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "async":
+		return ui.ExecutionModeAsync, nil
+	case "sync":
+		return ui.ExecutionModeSync, nil
+	default:
+		return ui.ExecutionModeAsync, fmt.Errorf("invalid execution mode %q (use async or sync)", value)
+	}
+}
+
 // runWorker runs the background task selection and agent spawning
-func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents) {
+func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode ui.ExecutionMode, modeUpdates <-chan ui.ExecutionMode) {
 	// Create the REST client
 	c := client.NewClient(GetBaseURL())
 
@@ -151,18 +184,74 @@ func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents) {
 	// Signal connected
 	p.Send(ui.ListenerConnectedMsg{})
 
+	pending := make([]*client.Task, 0)
+	queued := make(map[string]bool)
+
+	startTask := func(task *client.Task) {
+		delete(queued, task.ID)
+		if err := wf.StartWorking([]string{task.ID}); err != nil {
+			p.Send(ui.ListenerErrorMsg{Err: err})
+			return
+		}
+		spawnAgent(ctx, p, task, wf, agents)
+	}
+
+	queueTask := func(task *client.Task) {
+		if queued[task.ID] {
+			return
+		}
+		queued[task.ID] = true
+		pending = append(pending, task)
+	}
+
+	startNextPending := func() {
+		if len(pending) == 0 || agents.hasRunning() {
+			return
+		}
+		next := pending[0]
+		pending = pending[1:]
+		startTask(next)
+	}
+
+	startAllPending := func() {
+		if len(pending) == 0 {
+			return
+		}
+		tasks := pending
+		pending = nil
+		for _, task := range tasks {
+			startTask(task)
+		}
+	}
+
 	// Main loop
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-agents.done():
+		case newMode := <-modeUpdates:
+			mode = newMode
+			if mode == ui.ExecutionModeAsync {
+				startAllPending()
+			}
 		default:
 		}
 
+		if mode == ui.ExecutionModeSync && len(pending) > 0 && !agents.hasRunning() {
+			startNextPending()
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+
 		// Try to select a task
-		task, err := selector.SelectTask()
+		task, err := selector.SelectTaskExcluding(queued)
 		if err != nil {
 			if errors.Is(err, selection.ErrNoTaskAvailable) {
+				if len(pending) > 0 {
+					time.Sleep(250 * time.Millisecond)
+					continue
+				}
 				// Wait for a task to become available (only from auto epics)
 				if err := waitForTaskWithSSE(ctx, sseEvents, selector); err != nil {
 					if errors.Is(err, context.Canceled) {
@@ -178,20 +267,25 @@ func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents) {
 			continue
 		}
 
+		if mode == ui.ExecutionModeSync && agents.hasRunning() {
+			queueTask(task)
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+
 		// Skip if agent already running for this task
 		if agents.isRunning(task.ID) {
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		// Mark task as in_progress
-		if err := wf.StartWorking([]string{task.ID}); err != nil {
-			p.Send(ui.ListenerErrorMsg{Err: err})
+		if mode == ui.ExecutionModeSync {
+			queueTask(task)
+			startNextPending()
 			continue
 		}
 
-		// Spawn agent
-		spawnAgent(ctx, p, task, wf, agents)
+		startTask(task)
 	}
 }
 
@@ -326,4 +420,3 @@ Task context:
 
 	return b.String()
 }
-

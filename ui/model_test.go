@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewModel(t *testing.T) {
-	model := NewModel("Test criteria")
+	model := NewModel("Test criteria", ExecutionModeAsync, nil)
 
 	if model.criteria != "Test criteria" {
 		t.Errorf("expected criteria 'Test criteria', got %q", model.criteria)
@@ -19,6 +19,9 @@ func TestNewModel(t *testing.T) {
 	}
 	if len(model.panels) != 0 {
 		t.Errorf("expected 0 panels, got %d", len(model.panels))
+	}
+	if model.mode != ExecutionModeAsync {
+		t.Errorf("expected mode async, got %s", model.mode.String())
 	}
 	if model.agentUpdates == nil {
 		t.Error("agentUpdates channel should be initialized")
@@ -76,7 +79,7 @@ func TestAgentPanel_IsFinished(t *testing.T) {
 }
 
 func TestModel_Update_WindowSizeMsg(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	msg := tea.WindowSizeMsg{Width: 100, Height: 50}
 	newModel, _ := model.Update(msg)
@@ -91,7 +94,7 @@ func TestModel_Update_WindowSizeMsg(t *testing.T) {
 }
 
 func TestModel_Update_ListenerConnectedMsg(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	if model.connected {
 		t.Error("model should not be connected initially")
@@ -109,7 +112,7 @@ func TestModel_Update_ListenerConnectedMsg(t *testing.T) {
 }
 
 func TestModel_Update_ListenerErrorMsg(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	err := &testError{msg: "test error"}
 	newModel, _ := model.Update(ListenerErrorMsg{Err: err})
@@ -124,7 +127,7 @@ func TestModel_Update_ListenerErrorMsg(t *testing.T) {
 }
 
 func TestModel_Update_AddAgentMsg(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	if len(model.panels) != 0 {
 		t.Error("model should have no panels initially")
@@ -153,7 +156,7 @@ func TestModel_Update_AddAgentMsg(t *testing.T) {
 }
 
 func TestModel_Update_AddMultipleAgents(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	model.Update(AddAgentMsg{TaskID: "task-1", TaskTitle: "Task 1", AgentName: "Claude"})
 	newModel, _ := model.Update(AddAgentMsg{TaskID: "task-2", TaskTitle: "Task 2", AgentName: "Claude"})
@@ -172,7 +175,7 @@ func TestModel_Update_AddMultipleAgents(t *testing.T) {
 }
 
 func TestModel_Update_AgentOutputMsg(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 	model.width = 100
 	model.height = 50
 
@@ -196,7 +199,7 @@ func TestModel_Update_AgentOutputMsg(t *testing.T) {
 }
 
 func TestModel_Update_AgentOutputMsg_SkipsEmptyParsed(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 	model.width = 100
 	model.height = 50
 
@@ -216,7 +219,7 @@ func TestModel_Update_AgentOutputMsg_SkipsEmptyParsed(t *testing.T) {
 }
 
 func TestModel_Update_AgentCompletedMsg(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	model.Update(AddAgentMsg{TaskID: "task-1", TaskTitle: "Task 1", AgentName: "Claude"})
 
@@ -236,7 +239,7 @@ func TestModel_Update_AgentCompletedMsg(t *testing.T) {
 }
 
 func TestModel_HandleKeyPress_Quit(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	_, cmd := model.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	if cmd == nil {
@@ -245,7 +248,7 @@ func TestModel_HandleKeyPress_Quit(t *testing.T) {
 }
 
 func TestModel_HandleKeyPress_Tab(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	// Add two panels
 	model.Update(AddAgentMsg{TaskID: "task-1", TaskTitle: "Task 1", AgentName: "Claude"})
@@ -271,7 +274,7 @@ func TestModel_HandleKeyPress_Tab(t *testing.T) {
 }
 
 func TestModel_HandleKeyPress_Tab_Wraps(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	model.Update(AddAgentMsg{TaskID: "task-1", TaskTitle: "Task 1", AgentName: "Claude"})
 	model.Update(AddAgentMsg{TaskID: "task-2", TaskTitle: "Task 2", AgentName: "Claude"})
@@ -289,7 +292,7 @@ func TestModel_HandleKeyPress_Tab_Wraps(t *testing.T) {
 }
 
 func TestModel_HandleKeyPress_ShiftTab(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	model.Update(AddAgentMsg{TaskID: "task-1", TaskTitle: "Task 1", AgentName: "Claude"})
 	model.Update(AddAgentMsg{TaskID: "task-2", TaskTitle: "Task 2", AgentName: "Claude"})
@@ -304,7 +307,7 @@ func TestModel_HandleKeyPress_ShiftTab(t *testing.T) {
 }
 
 func TestModel_HandleKeyPress_CloseFinishedPanel(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	model.Update(AddAgentMsg{TaskID: "task-1", TaskTitle: "Task 1", AgentName: "Claude"})
 	model.panels[0].Result = &agent.Result{ExitCode: 0}
@@ -319,7 +322,7 @@ func TestModel_HandleKeyPress_CloseFinishedPanel(t *testing.T) {
 }
 
 func TestModel_HandleKeyPress_CannotCloseRunningPanel(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	model.Update(AddAgentMsg{TaskID: "task-1", TaskTitle: "Task 1", AgentName: "Claude"})
 	// Panel has no result, so it's still "running"
@@ -334,7 +337,7 @@ func TestModel_HandleKeyPress_CannotCloseRunningPanel(t *testing.T) {
 }
 
 func TestModel_HandleKeyPress_ScrollUp(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 	model.height = 50
 
 	model.Update(AddAgentMsg{TaskID: "task-1", TaskTitle: "Task 1", AgentName: "Claude"})
@@ -349,7 +352,7 @@ func TestModel_HandleKeyPress_ScrollUp(t *testing.T) {
 }
 
 func TestModel_HandleKeyPress_ScrollUp_AtTop(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	model.Update(AddAgentMsg{TaskID: "task-1", TaskTitle: "Task 1", AgentName: "Claude"})
 	model.panels[0].ScrollPos = 1
@@ -363,7 +366,7 @@ func TestModel_HandleKeyPress_ScrollUp_AtTop(t *testing.T) {
 }
 
 func TestModel_HandleKeyPress_ScrollDown(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 	model.height = 50
 
 	model.Update(AddAgentMsg{TaskID: "task-1", TaskTitle: "Task 1", AgentName: "Claude"})
@@ -381,7 +384,7 @@ func TestModel_HandleKeyPress_ScrollDown(t *testing.T) {
 }
 
 func TestModel_SetListening(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	model.SetListening(true)
 	if !model.listening {
@@ -395,7 +398,7 @@ func TestModel_SetListening(t *testing.T) {
 }
 
 func TestModel_SetConnected(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	model.SetConnected(true)
 	if !model.connected {
@@ -409,7 +412,7 @@ func TestModel_SetConnected(t *testing.T) {
 }
 
 func TestModel_SetError(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	err := &testError{msg: "test error"}
 	model.SetError(err)
@@ -424,7 +427,7 @@ func TestModel_SetError(t *testing.T) {
 }
 
 func TestModel_GetOpenPanelCount(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	if model.GetOpenPanelCount() != 0 {
 		t.Error("expected 0 panels initially")
@@ -442,7 +445,7 @@ func TestModel_GetOpenPanelCount(t *testing.T) {
 }
 
 func TestModel_HasRunningAgents(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	if model.HasRunningAgents() {
 		t.Error("expected no running agents initially")
@@ -457,7 +460,7 @@ func TestModel_HasRunningAgents(t *testing.T) {
 }
 
 func TestModel_GetUpdateChannel(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	ch := model.GetUpdateChannel()
 	if ch == nil {
@@ -466,7 +469,7 @@ func TestModel_GetUpdateChannel(t *testing.T) {
 }
 
 func TestModel_AddAgent(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 
 	id := model.AddAgent("task-1", "Task 1", "Claude", nil)
 
@@ -482,7 +485,7 @@ func TestModel_AddAgent(t *testing.T) {
 }
 
 func TestModel_View_EmptyWidth(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 	model.width = 0
 
 	result := model.View()
@@ -492,7 +495,7 @@ func TestModel_View_EmptyWidth(t *testing.T) {
 }
 
 func TestModel_GetPanelHeight(t *testing.T) {
-	model := NewModel("test")
+	model := NewModel("test", ExecutionModeAsync, nil)
 	model.height = 50
 
 	height := model.getPanelHeight()

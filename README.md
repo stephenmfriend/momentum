@@ -1,14 +1,22 @@
-# Flux + Momentum + Claude Code = ❤️ 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![GitHub release](https://img.shields.io/github/v/release/sirsjg/momentum)](https://github.com/stevegrehan/momentum/releases)
-![Go](https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white)
-![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)
-![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)
+# Momentum + Flux + Claude Code = ❤️ 
+
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![GitHub release](https://img.shields.io/github/v/release/sirsjg/momentum)](https://github.com/stevegrehan/momentum/releases) ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white) ![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white) ![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)
 
 > [!WARNING]
 > This tool is experimental and not ready for production use. 
 
 The perfect companion to Flux. Because once the board starts moving, it shouldn’t stop.
+
+## Install
+
+### Homebrew (macOS & Linux)
+
+Requires [Homebrew](https://brew.sh) to be installed.
+
+```bash
+brew tap sirsjg/momentum
+brew install momentum
+```
 
 ## Features
 
@@ -32,13 +40,52 @@ The perfect companion to Flux. Because once the board starts moving, it shouldn�
 - **Real-time sync** - Server-Sent Events (SSE) for instant task updates
 - **Workflow automation** - Automatic status transitions (todo → in_progress → done)
 
-## Install
+## Usage
 
-### Homebrew (macOS & Linux)
-
-Requires [Homebrew](https://brew.sh) to be installed.
+### Basic Usage
 
 ```bash
-brew tap sirsjg/momentum
-brew install momentum
+# Watch all projects for tasks
+momentum
+
+# Watch a specific project
+momentum --project myproject
+
+# Watch a specific epic
+momentum --epic epic-456
+
+# Work on a specific task
+momentum --task task-789
 ```
+
+### Execution Modes
+
+```bash
+# Run agents in parallel (default)
+momentum --project myproject --execution-mode async
+
+# Run agents sequentially (one at a time)
+momentum --project myproject --execution-mode sync
+```
+
+You can also toggle between modes at runtime by pressing `m` in the TUI.
+
+### Custom Flux Server
+
+```bash
+# Connect to a different Flux server
+momentum --base-url http://flux.example.com:3000 --project myproject
+```
+
+### Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Cycle focus between agent panels |
+| `Shift+Tab` | Cycle focus backwards |
+| `j` / `↓` | Scroll down in focused panel |
+| `k` / `↑` | Scroll up in focused panel |
+| `m` | Toggle execution mode (async/sync) |
+| `s` / `Esc` | Stop the focused agent |
+| `x` / `c` | Close a finished panel |
+| `q` / `Ctrl+C` | Quit |

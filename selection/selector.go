@@ -46,29 +46,38 @@ func NewSelector(c *client.Client, projectID, epicID, taskID string) *Selector {
 //
 // Within the qualifying tasks, newer tasks (by ID) come first.
 func (s *Selector) SelectTask() (*client.Task, error) {
+	return s.SelectTaskExcluding(nil)
+}
+
+// SelectTaskExcluding selects a task while skipping any task IDs in excluded.
+func (s *Selector) SelectTaskExcluding(excluded map[string]bool) (*client.Task, error) {
 	// Case 1: Specific task ID provided
 	if s.taskID != "" {
-		return s.fetchSpecificTask()
+		return s.fetchSpecificTask(excluded)
 	}
 
 	// Case 2: Epic ID provided - get tasks from that epic's project filtered by epic
 	if s.epicID != "" {
-		return s.selectFromEpic()
+		return s.selectFromEpic(excluded)
 	}
 
 	// Case 3: Project ID provided - get tasks from that project
 	if s.projectID != "" {
-		return s.selectFromProject(s.projectID)
+		return s.selectFromProject(s.projectID, excluded)
 	}
 
 	// Case 4: No filters - search across all projects
-	return s.selectFromAllProjects()
+	return s.selectFromAllProjects(excluded)
 }
 
 // fetchSpecificTask fetches a task by its ID.
 // Since the client doesn't have a GetTask method, we need to find it
 // by listing tasks from all projects.
-func (s *Selector) fetchSpecificTask() (*client.Task, error) {
+func (s *Selector) fetchSpecificTask(excluded map[string]bool) (*client.Task, error) {
+	if excluded != nil && excluded[s.taskID] {
+		return nil, fmt.Errorf("task %s excluded: %w", s.taskID, ErrNoTaskAvailable)
+	}
+
 	// We need to find the task across all projects since we don't know which project it belongs to
 	projects, err := s.client.ListProjects()
 	if err != nil {
@@ -93,7 +102,7 @@ func (s *Selector) fetchSpecificTask() (*client.Task, error) {
 }
 
 // selectFromEpic selects the best task from the specified epic.
-func (s *Selector) selectFromEpic() (*client.Task, error) {
+func (s *Selector) selectFromEpic(excluded map[string]bool) (*client.Task, error) {
 	// First, we need to find which project this epic belongs to
 	projects, err := s.client.ListProjects()
 	if err != nil {
@@ -142,11 +151,11 @@ func (s *Selector) selectFromEpic() (*client.Task, error) {
 	// Build auto epic IDs map (just this epic since we already verified it's auto)
 	autoEpicIDs := map[string]bool{s.epicID: true}
 
-	return s.selectBestTask(tasks, autoEpicIDs)
+	return s.selectBestTask(tasks, autoEpicIDs, excluded)
 }
 
 // selectFromProject selects the best task from the specified project.
-func (s *Selector) selectFromProject(projectID string) (*client.Task, error) {
+func (s *Selector) selectFromProject(projectID string, excluded map[string]bool) (*client.Task, error) {
 	tasks, err := s.client.ListTasks(projectID, client.TaskFilters{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tasks for project %s: %w", projectID, err)
@@ -158,11 +167,11 @@ func (s *Selector) selectFromProject(projectID string) (*client.Task, error) {
 		return nil, err
 	}
 
-	return s.selectBestTask(tasks, autoEpicIDs)
+	return s.selectBestTask(tasks, autoEpicIDs, excluded)
 }
 
 // selectFromAllProjects selects the best task across all projects.
-func (s *Selector) selectFromAllProjects() (*client.Task, error) {
+func (s *Selector) selectFromAllProjects(excluded map[string]bool) (*client.Task, error) {
 	projects, err := s.client.ListProjects()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list projects: %w", err)
@@ -193,7 +202,7 @@ func (s *Selector) selectFromAllProjects() (*client.Task, error) {
 		}
 	}
 
-	return s.selectBestTask(allTasks, allAutoEpicIDs)
+	return s.selectBestTask(allTasks, allAutoEpicIDs, excluded)
 }
 
 // getAutoEpicIDs returns a map of epic IDs that have auto=true for the given project.
@@ -215,7 +224,7 @@ func (s *Selector) getAutoEpicIDs(projectID string) (map[string]bool, error) {
 // selectBestTask selects the best task from a list.
 // Only tasks belonging to auto-enabled epics with status "todo" and unblocked are considered.
 // Tasks are sorted by ID descending (newer first).
-func (s *Selector) selectBestTask(tasks []client.Task, autoEpicIDs map[string]bool) (*client.Task, error) {
+func (s *Selector) selectBestTask(tasks []client.Task, autoEpicIDs map[string]bool, excluded map[string]bool) (*client.Task, error) {
 	if len(tasks) == 0 {
 		return nil, ErrNoTaskAvailable
 	}
@@ -229,7 +238,7 @@ func (s *Selector) selectBestTask(tasks []client.Task, autoEpicIDs map[string]bo
 	}
 
 	// Filter and sort tasks
-	candidates := filterAndSortTasks(autoTasks)
+	candidates := filterAndSortTasks(autoTasks, excluded)
 
 	if len(candidates) == 0 {
 		return nil, ErrNoTaskAvailable
@@ -240,10 +249,13 @@ func (s *Selector) selectBestTask(tasks []client.Task, autoEpicIDs map[string]bo
 
 // filterAndSortTasks filters tasks to only include unblocked tasks with status "todo",
 // sorted by ID descending (newer first).
-func filterAndSortTasks(tasks []client.Task) []client.Task {
+func filterAndSortTasks(tasks []client.Task, excluded map[string]bool) []client.Task {
 	var unblockedTodos []client.Task
 
 	for _, task := range tasks {
+		if excluded != nil && excluded[task.ID] {
+			continue
+		}
 		if !task.Blocked && task.Status == "todo" {
 			unblockedTodos = append(unblockedTodos, task)
 		}
