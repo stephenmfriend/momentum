@@ -1,3 +1,17 @@
+## [1.0.1](https://github.com/sirsjg/momentum/compare/v1.0.0...v1.0.1) (2026-01-11)
+
+### Bug Fixes
+
+* version ([182e829](https://github.com/sirsjg/momentum/commit/182e829c570f4c9710adcd64c75cfbe926f04b9a))
+
+### Continuous Integration
+
+* goreleaser ([81995db](https://github.com/sirsjg/momentum/commit/81995db32eeac0235aa4db5631f0b3a865289c8e))
+
+### Chores
+
+* update ownership and improve brew formula ([a4eb4cc](https://github.com/sirsjg/momentum/commit/a4eb4ccc099b5ba635362f8fae01279c0d14121b))
+
 ## 1.0.0 (2026-01-11)
 
 ### Features
