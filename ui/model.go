@@ -362,11 +362,12 @@ func (m *Model) View() string {
 	var b strings.Builder
 
 	// Header - ASCII art logo
-	logo := ` __  __                            _
-|  \/  | ___  _ __ ___   ___ _ __ | |_ _   _ _ __ ___
-| |\/| |/ _ \| '_ ` + "`" + ` _ \ / _ \ '_ \| __| | | | '_ ` + "`" + ` _ \
-| |  | | (_) | | | | | |  __/ | | | |_| |_| | | | | | |
-|_|  |_|\___/|_| |_| |_|\___|_| |_|\__|\__,_|_| |_| |_|`
+	logo := `
+                                     ██                  
+███▄███▄ ▄███▄ ███▄███▄ ▄█▀█▄ ████▄ ▀██▀▀ ██ ██ ███▄███▄ 
+██ ██ ██ ██ ██ ██ ██ ██ ██▄█▀ ██ ██  ██   ██ ██ ██ ██ ██ 
+██ ██ ██ ▀███▀ ██ ██ ██ ▀█▄▄▄ ██ ██  ██   ▀██▀█ ██ ██ ██ 
+`
 	b.WriteString(LogoStyle.Render(logo))
 	b.WriteString("\n")
 	b.WriteString(TaglineStyle.Render("keep the board moving"))
