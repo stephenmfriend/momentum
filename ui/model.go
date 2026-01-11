@@ -70,6 +70,10 @@ type Model struct {
 
 	// Agent updates channel
 	agentUpdates chan AgentUpdate
+
+	// Update notification
+	updateAvailable bool
+	latestVersion   string
 }
 
 
@@ -90,6 +94,10 @@ func NewModel(criteria string) Model {
 // Messages
 type tickMsg time.Time
 type agentUpdateMsg AgentUpdate
+type versionCheckMsg struct {
+	latestVersion   string
+	updateAvailable bool
+}
 
 // ListenerConnectedMsg signals the listener is connected
 type ListenerConnectedMsg struct{}
@@ -122,6 +130,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		tickCmd(),
+		checkVersionCmd(),
 	)
 }
 
@@ -129,6 +138,16 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+func checkVersionCmd() tea.Cmd {
+	return func() tea.Msg {
+		latest, available := version.CheckForUpdate()
+		return versionCheckMsg{
+			latestVersion:   latest,
+			updateAvailable: available,
+		}
+	}
 }
 
 // Update handles messages
@@ -170,6 +189,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AgentCompletedMsg:
 		m.completeAgent(msg.TaskID, msg.Result)
+		return m, nil
+
+	case versionCheckMsg:
+		m.updateAvailable = msg.updateAvailable
+		m.latestVersion = msg.latestVersion
 		return m, nil
 	}
 
@@ -367,6 +391,12 @@ func (m *Model) View() string {
 		HelpKeyStyle.Render("x") + HelpStyle.Render(" close  ") +
 		HelpKeyStyle.Render("q") + HelpStyle.Render(" quit")
 	b.WriteString(help)
+
+	// Update notification
+	if m.updateAvailable {
+		updateMsg := fmt.Sprintf("  Update available: v%s - run: brew upgrade momentum", m.latestVersion)
+		b.WriteString(UpdateAvailableStyle.Render(updateMsg))
+	}
 
 	return b.String()
 }

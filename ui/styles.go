@@ -8,6 +8,7 @@ var (
 	Cyan      = lipgloss.Color("#06B6D4")
 	Green     = lipgloss.Color("#10B981")
 	Amber     = lipgloss.Color("#F59E0B")
+	Orange    = lipgloss.Color("#F97316")
 	Red       = lipgloss.Color("#EF4444")
 	Gray      = lipgloss.Color("#6B7280")
 	DarkGray  = lipgloss.Color("#374151")
@@ -101,4 +102,9 @@ var (
 
 	HelpKeyStyle = lipgloss.NewStyle().
 			Foreground(Cyan)
+
+	// Update notification
+	UpdateAvailableStyle = lipgloss.NewStyle().
+				Foreground(Orange).
+				Bold(true)
 )
