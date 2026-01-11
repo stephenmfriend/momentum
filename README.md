@@ -20,3 +20,12 @@ The perfect companion to Flux. Because once the board starts moving, it shouldnâ
 ### Flux Integration
 - Full REST client for Projects, Epics, and Tasks
 - Real-time sync via Server-Sent Events (SSE)
+
+## Install
+
+### Homebrew (macOS & Linux)
+
+```bash
+brew tap sirsjg/momentum
+brew install momentum
+```

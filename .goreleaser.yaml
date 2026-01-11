@@ -86,7 +86,7 @@ changelog:
 
 release:
   github:
-    owner: stevegrehan
+    owner: sirsjg
     name: momentum
   prerelease: auto
   draft: false
@@ -95,14 +95,14 @@ release:
 brews:
   - name: momentum
     repository:
-      owner: stevegrehan
-      name: homebrew-tap
+      owner: sirsjg
+      name: homebrew-momentum
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: "https://github.com/stevegrehan/momentum"
-    description: "Headless agent runner for Flux project management"
+    homepage: "https://github.com/sirsjg/momentum"
+    description: "Lightweight CLI for managing Flux agents"
     license: "MIT"
     install: |
       bin.install "momentum"
     test: |
-      system "#{bin}/momentum", "version"
+      system "#{bin}/momentum", "--version"
