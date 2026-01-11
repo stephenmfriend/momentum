@@ -1,0 +1,29 @@
+## 1.0.0 (2026-01-11)
+
+### Features
+
+* add Claude Code agent integration ([5d18846](https://github.com/sirsjg/momentum/commit/5d18846c543c6a812c43dd81697565f379f64e2b))
+* adds rate limiting and task monitoring ([df4739c](https://github.com/sirsjg/momentum/commit/df4739c40caf27b40d13ed9cd6a0b4880bc66df2))
+
+### Bug Fixes
+
+* enhances agent management functionality ([3893e97](https://github.com/sirsjg/momentum/commit/3893e97c1406b7b73cb3f4bb58cd2b429ded3938)), closes [#456](https://github.com/sirsjg/momentum/issues/456)
+* enhances agent process management and UI feedback ([ac3ed60](https://github.com/sirsjg/momentum/commit/ac3ed60f42bfb070f95f06682bcefb55e63f2651))
+* updates claude command for real-time output ([607ec78](https://github.com/sirsjg/momentum/commit/607ec784eae99b9d3f1a18d3b6d7640ae0c7804d))
+
+### Code Refactoring
+
+* headless mode for improved task automation ([7844a73](https://github.com/sirsjg/momentum/commit/7844a739e67ac3c68a00ac588d11774821549f60))
+
+### Build System
+
+* fix ci ([f10b0bb](https://github.com/sirsjg/momentum/commit/f10b0bb0c073e5e44607f94e81f97d2a9de3e778))
+* removes redundant lint job from CI workflow ([15f13c3](https://github.com/sirsjg/momentum/commit/15f13c3ac144c89fd275d5cccd57e9b530ea2e86))
+* set up CI/CD pipelines ([a31893a](https://github.com/sirsjg/momentum/commit/a31893a949ed6c6cff2be522590303315b46737a))
+* set up CI/CD pipelines ([f098921](https://github.com/sirsjg/momentum/commit/f098921c01bed64f1f3ddf0aa69ef964e8af0407))
+* set up CI/CD workflows and versioning ([f77291d](https://github.com/sirsjg/momentum/commit/f77291dd4e020360bc425fa918d46938796f0601))
+
+### Chores
+
+* gitignore ([535b348](https://github.com/sirsjg/momentum/commit/535b348b64c91ed9c34ac8b673585e85f2d6a302))
+* scaffold ([173fc6c](https://github.com/sirsjg/momentum/commit/173fc6c0b83c704ec6c00155291b6d67637b6e1a))
