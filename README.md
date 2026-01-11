@@ -1,6 +1,6 @@
 # Flux + Momentum + Claude Code = ❤️ 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![GitHub release](https://img.shields.io/github/v/release/stevegrehan/momentum)](https://github.com/stevegrehan/momentum/releases)
+[![GitHub release](https://img.shields.io/github/v/release/sirsjg/momentum)](https://github.com/stevegrehan/momentum/releases)
 ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)
@@ -15,17 +15,22 @@ The perfect companion to Flux. Because once the board starts moving, it shouldn�
 > [!NOTE]
 > Currently only Claude Code is supported. Future releases will add support for other agents such as Codex.
 
-### Headless Mode
-- **Smart task selection** - Automatically picks the newest unblocked todo task
-- **Flexible filtering** - Filter by `--project`, `--epic`, or `--task`
+### Agent Orchestration
+- **Automatic task execution** - Watches for tasks and spawns Claude Code agents automatically
+- **Async & sync modes** - Run multiple agents in parallel or sequentially (`--execution-mode`)
+- **Graceful cancellation** - Stop agents cleanly with SIGINT handling
 
-### Workflow Operations
-- **Batch status transitions** - Start, complete, or reset multiple tasks at once
-- **Dependency awareness** - Blocked tasks are visually distinguished
+### Terminal UI
+- **Multi-panel dashboard** - Monitor multiple running agents simultaneously
+- **Real-time output streaming** - Watch agent progress with parsed JSON output
+- **Keyboard navigation** - Tab between panels, scroll with j/k, stop/close agents
+- **Auto-update notifications** - Get notified when new versions are available
 
 ### Flux Integration
-- Full REST client for Projects, Epics, and Tasks
-- Real-time sync via Server-Sent Events (SSE)
+- **Smart task selection** - Automatically picks unblocked todo tasks from auto-enabled epics
+- **Flexible filtering** - Filter by `--project`, `--epic`, or `--task`
+- **Real-time sync** - Server-Sent Events (SSE) for instant task updates
+- **Workflow automation** - Automatic status transitions (todo → in_progress → done)
 
 ## Install
 
