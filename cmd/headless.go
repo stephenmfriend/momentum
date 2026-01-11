@@ -295,16 +295,34 @@ func spawnAgent(ctx context.Context, p *tea.Program, task *client.Task, wf *work
 func buildHeadlessPrompt(task *client.Task) string {
 	var b strings.Builder
 
-	b.WriteString("You are working on a task from a project management system.\n\n")
+	b.WriteString(`Goal: complete a single Flux task end-to-end, verify it works, and mark the task as done in Flux.
 
-	b.WriteString(fmt.Sprintf("Task ID: %s\n", task.ID))
-	b.WriteString(fmt.Sprintf("Task: %s\n", task.Title))
+Process:
+1) Find the task to work on (use the given task ID/title, or select the highest-priority todo in the target project).
+2) Inspect relevant files; keep changes minimal and aligned with existing patterns.
+3) Implement the task.
+4) Verify the change:
+   - Prefer existing tests/scripts. If none, run a reasonable check (build/typecheck or a minimal manual check).
+   - Report what you ran and the result.
+   - Add a comment to the task via MCP.
+5) Mark the task as done using Flux MCP (mcp__flux__move_task_status with status "done") and mention the task ID in your final message.
+
+Constraints:
+- Do not modify unrelated files.
+- Do not reset/revert unrelated git changes.
+- Be concise in explanations.
+
+If anything blocks completion, stop and report the blocker instead of guessing, and set the task status back to "planning", and add a comment explaining the issue.
+
+Task context:
+`)
+
+	b.WriteString(fmt.Sprintf("- Task ID: %s\n", task.ID))
+	b.WriteString(fmt.Sprintf("- Task: %s\n", task.Title))
 
 	if task.Notes != "" {
-		b.WriteString(fmt.Sprintf("\nDetails:\n%s\n", task.Notes))
+		b.WriteString(fmt.Sprintf("- Details:\n%s\n", task.Notes))
 	}
-
-	b.WriteString("\nPlease complete this task. When finished, provide a summary of what was done.")
 
 	return b.String()
 }
