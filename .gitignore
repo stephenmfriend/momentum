@@ -33,3 +33,5 @@ go.work.sum
 
 # Version file (created by semantic-release)
 .version
+
+.DS_Store
