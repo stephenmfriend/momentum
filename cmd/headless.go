@@ -2,277 +2,277 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/signal"
 	"strings"
-	"syscall"
+	"sync"
 	"time"
 
-	"github.com/spf13/cobra"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stevegrehan/momentum/agent"
 	"github.com/stevegrehan/momentum/client"
 	"github.com/stevegrehan/momentum/selection"
 	"github.com/stevegrehan/momentum/sse"
+	"github.com/stevegrehan/momentum/ui"
 	"github.com/stevegrehan/momentum/workflow"
 )
 
+// sseEventData represents the structure of SSE event payloads
+type sseEventData struct {
+	Epic *struct {
+		Auto bool `json:"auto"`
+	} `json:"epic,omitempty"`
+}
+
+// runningAgents tracks which tasks have active agents
+type runningAgents struct {
+	mu    sync.Mutex
+	tasks map[string]bool
+}
+
+func newRunningAgents() *runningAgents {
+	return &runningAgents{
+		tasks: make(map[string]bool),
+	}
+}
+
+func (r *runningAgents) isRunning(taskID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.tasks[taskID]
+}
+
+func (r *runningAgents) markRunning(taskID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tasks[taskID] = true
+}
+
+func (r *runningAgents) markDone(taskID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tasks, taskID)
+}
+
+// isAutoEpicEvent checks if the SSE event contains an epic with auto=true
+func isAutoEpicEvent(event sse.Event) bool {
+	var data sseEventData
+	if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
+		return false
+	}
+	return data.Epic != nil && data.Epic.Auto
+}
+
 var (
-	// headless mode flags
+	// Task selection flags (defined here, registered in root.go)
 	taskID    string
 	epicID    string
 	projectID string
 )
 
-// headlessCmd represents the headless command
-var headlessCmd = &cobra.Command{
-	Use:   "headless",
-	Short: "Run Momentum in headless mode for automation",
-	Long: `Run Momentum in headless mode without a user interface.
-
-This mode is designed for automation, scripting, and CI/CD pipelines.
-Use flags to specify which project, epic, or task to work with.
-
-If no flags are specified, the newest unblocked todo task across all projects
-will be selected automatically.
-
-The selected task will be executed by the Claude Code agent, which will:
-1. Mark the task as 'in_progress'
-2. Execute the task using Claude Code
-3. Mark the task as 'done' on successful completion
-
-Examples:
-  # Auto-select newest unblocked todo task from any project
-  momentum headless
-
-  # Work with a specific project
-  momentum headless --project proj-123
-
-  # Work with a specific epic in a project
-  momentum headless --epic epic-456
-
-  # Work with a specific task
-  momentum headless --task task-789
-
-  # Combine with custom server URL
-  momentum --base-url http://flux.example.com:3000 headless --project myproject`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runHeadless()
-	},
-}
-
-func init() {
-	rootCmd.AddCommand(headlessCmd)
-
-	// Headless mode specific flags
-	headlessCmd.Flags().StringVar(&taskID, "task", "", "Task ID to work with")
-	headlessCmd.Flags().StringVar(&epicID, "epic", "", "Epic ID to work with")
-	headlessCmd.Flags().StringVar(&projectID, "project", "", "Project ID to work with")
-}
-
-// eyesFrames are the animation frames for the watching indicator
-var eyesFrames = []string{"◐", "◓", "◑", "◒"}
-
-// runHeadless executes the headless mode logic
+// runHeadless executes the headless mode logic with TUI
 func runHeadless() error {
-	fmt.Printf("Running in headless mode...\n")
-	fmt.Printf("Connecting to Flux server at: %s\n", GetBaseURL())
-	fmt.Println()
+	// Build criteria string for display
+	criteria := buildCriteriaString()
 
+	// Create the TUI model
+	model := ui.NewModel(criteria)
+
+	// Create the bubbletea program
+	p := tea.NewProgram(&model, tea.WithAltScreen())
+
+	// Create context for cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start the background worker
+	go runWorker(ctx, p)
+
+	// Run the TUI
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("error running UI: %w", err)
+	}
+
+	return nil
+}
+
+func buildCriteriaString() string {
+	if taskID != "" {
+		return fmt.Sprintf("Task: %s", taskID)
+	}
+	if epicID != "" {
+		return fmt.Sprintf("Epic: %s", epicID)
+	}
+	if projectID != "" {
+		return fmt.Sprintf("Project: %s", projectID)
+	}
+	return "All projects"
+}
+
+// runWorker runs the background task selection and agent spawning
+func runWorker(ctx context.Context, p *tea.Program) {
 	// Create the REST client
 	c := client.NewClient(GetBaseURL())
 
 	// Create workflow for status updates
 	wf := workflow.NewWorkflow(c)
 
-	// Create the selector with the provided filters
+	// Create the selector
 	selector := selection.NewSelector(c, projectID, epicID, taskID)
 
-	// Log the selection criteria
-	if taskID != "" {
-		fmt.Printf("Selection criteria: specific task %s\n", taskID)
-	} else if epicID != "" {
-		fmt.Printf("Selection criteria: first unblocked todo from epic %s\n", epicID)
-	} else if projectID != "" {
-		fmt.Printf("Selection criteria: first unblocked todo from project %s\n", projectID)
-	} else {
-		fmt.Printf("Selection criteria: newest unblocked todo across all projects\n")
-	}
-	fmt.Println()
+	// Track running agents to prevent duplicate spawning
+	agents := newRunningAgents()
 
-	// Setup signal handling for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigChan
-		fmt.Println("\nShutting down...")
-		cancel()
-	}()
-
-	// Start SSE subscriber for live updates
+	// Start SSE subscriber
 	subscriber := sse.NewSubscriber(GetBaseURL())
 	sseEvents := subscriber.Start(ctx)
 	defer subscriber.Stop()
 
-	// Main loop - keep looking for tasks
+	// Signal connected
+	p.Send(ui.ListenerConnectedMsg{})
+
+	// Main loop
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		default:
 		}
 
-		// Select a task
+		// Try to select a task
 		task, err := selector.SelectTask()
 		if err != nil {
 			if errors.Is(err, selection.ErrNoTaskAvailable) {
-				// No task available - wait and watch for new tasks
-				if err := waitForTask(ctx, sseEvents, selector); err != nil {
+				// Wait for a task to become available (only from auto epics)
+				if err := waitForTaskWithSSE(ctx, sseEvents, selector); err != nil {
 					if errors.Is(err, context.Canceled) {
-						return nil
+						return
 					}
-					return err
+					p.Send(ui.ListenerErrorMsg{Err: err})
+					time.Sleep(5 * time.Second)
 				}
-				continue // Task became available, loop back to select it
+				continue
 			}
-			return fmt.Errorf("failed to select task: %w", err)
+			p.Send(ui.ListenerErrorMsg{Err: err})
+			time.Sleep(5 * time.Second)
+			continue
 		}
 
-		// Print the selected task details
-		fmt.Println("Selected task:")
-		fmt.Println("==============")
-		fmt.Printf("  ID:        %s\n", task.ID)
-		fmt.Printf("  Title:     %s\n", task.Title)
-		fmt.Printf("  Status:    %s\n", task.Status)
-		fmt.Printf("  Blocked:   %t\n", task.Blocked)
-		fmt.Printf("  Project:   %s\n", task.ProjectID)
-		if task.EpicID != "" {
-			fmt.Printf("  Epic:      %s\n", task.EpicID)
+		// Skip if agent already running for this task
+		if agents.isRunning(task.ID) {
+			time.Sleep(1 * time.Second)
+			continue
 		}
-		if task.Notes != "" {
-			fmt.Printf("  Notes:     %s\n", task.Notes)
-		}
-		if len(task.DependsOn) > 0 {
-			fmt.Printf("  Depends on: %v\n", task.DependsOn)
-		}
-		fmt.Println()
 
 		// Mark task as in_progress
-		fmt.Printf("Starting task %s...\n", task.ID)
 		if err := wf.StartWorking([]string{task.ID}); err != nil {
-			return fmt.Errorf("failed to start task: %w", err)
+			p.Send(ui.ListenerErrorMsg{Err: err})
+			continue
 		}
 
-		// Build prompt for the agent
-		prompt := buildHeadlessPrompt(task)
-
-		// Create and run agent
-		fmt.Println("Spawning Claude Code agent...")
-		fmt.Println()
-
-		ag := agent.NewClaudeCode(agent.Config{
-			WorkDir: ".",
-		})
-
-		runner := agent.NewRunner(ag)
-
-		if err := runner.Run(ctx, prompt); err != nil {
-			return fmt.Errorf("failed to start agent: %w", err)
-		}
-
-		// Stream output to console
-		go func() {
-			for line := range runner.Output() {
-				if line.IsStderr {
-					fmt.Fprintf(os.Stderr, "%s\n", line.Text)
-				} else {
-					fmt.Println(line.Text)
-				}
-			}
-		}()
-
-		// Wait for completion
-		result := <-runner.Done()
-
-		fmt.Println()
-		if result.ExitCode == 0 {
-			fmt.Printf("Agent completed successfully in %v\n", result.Duration)
-
-			// Mark task as done
-			if err := wf.MarkComplete([]string{task.ID}); err != nil {
-				return fmt.Errorf("failed to mark task complete: %w", err)
-			}
-			fmt.Printf("Task %s marked as done.\n", task.ID)
-		} else {
-			fmt.Printf("Agent failed with exit code %d\n", result.ExitCode)
-			fmt.Printf("Task %s remains in progress for investigation.\n", task.ID)
-			if result.Error != nil {
-				return result.Error
-			}
-		}
-
-		fmt.Println()
-		fmt.Println("Task completed. Looking for next task...")
-		fmt.Println()
+		// Spawn agent
+		spawnAgent(ctx, p, task, wf, agents)
 	}
 }
 
-// waitForTask waits for a task to become available, showing an animated indicator
-func waitForTask(ctx context.Context, sseEvents <-chan sse.Event, selector *selection.Selector) error {
-	fmt.Print("Watching for tasks... ")
-
-	frameIdx := 0
-	ticker := time.NewTicker(150 * time.Millisecond)
-	defer ticker.Stop()
-
-	// Poll interval for checking tasks (in case SSE misses something)
+// waitForTaskWithSSE waits for a task to become available using SSE.
+// Only processes events where the epic has auto=true.
+func waitForTaskWithSSE(ctx context.Context, sseEvents <-chan sse.Event, selector *selection.Selector) error {
 	pollTicker := time.NewTicker(5 * time.Second)
 	defer pollTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println() // Clear the line
 			return ctx.Err()
 
 		case event, ok := <-sseEvents:
 			if !ok {
-				// SSE channel closed, fall back to polling
 				continue
 			}
-			// Check if this is a task-related event
+			// Only process events from auto-enabled epics
+			if !isAutoEpicEvent(event) {
+				continue
+			}
 			if event.Type == "task.created" ||
 				event.Type == "task.updated" ||
 				event.Type == "task.status_changed" ||
 				event.Type == "data-changed" {
-				// Check if a task is now available
 				if _, err := selector.SelectTask(); err == nil {
-					fmt.Println("\r\033[K") // Clear the line
 					return nil
 				}
 			}
 
 		case <-pollTicker.C:
-			// Periodic poll in case SSE missed an event
 			if _, err := selector.SelectTask(); err == nil {
-				fmt.Println("\r\033[K") // Clear the line
 				return nil
 			}
-
-		case <-ticker.C:
-			// Animate the eyes
-			fmt.Printf("\rWatching for tasks... %s ", eyesFrames[frameIdx])
-			frameIdx = (frameIdx + 1) % len(eyesFrames)
 		}
 	}
 }
 
-// buildHeadlessPrompt constructs the prompt for the agent in headless mode
+// spawnAgent spawns a new agent for the given task
+func spawnAgent(ctx context.Context, p *tea.Program, task *client.Task, wf *workflow.Workflow, agents *runningAgents) {
+	// Mark task as having a running agent
+	agents.markRunning(task.ID)
+
+	// Create agent
+	ag := agent.NewClaudeCode(agent.Config{
+		WorkDir: ".",
+	})
+
+	runner := agent.NewRunner(ag)
+
+	// Build prompt
+	prompt := buildHeadlessPrompt(task)
+
+	// Start the agent
+	if err := runner.Run(ctx, prompt); err != nil {
+		agents.markDone(task.ID)
+		p.Send(ui.ListenerErrorMsg{Err: err})
+		return
+	}
+
+	// Add panel to UI via message
+	p.Send(ui.AddAgentMsg{
+		TaskID:    task.ID,
+		TaskTitle: task.Title,
+		AgentName: "Claude",
+		Runner:    runner,
+	})
+
+	// Stream output in background
+	go func() {
+		for line := range runner.Output() {
+			p.Send(ui.AgentOutputMsg{
+				TaskID: task.ID,
+				Line:   line,
+			})
+		}
+	}()
+
+	// Wait for completion in background
+	go func() {
+		result := <-runner.Done()
+
+		// Mark agent as done
+		agents.markDone(task.ID)
+
+		p.Send(ui.AgentCompletedMsg{
+			TaskID: task.ID,
+			Result: result,
+		})
+
+		// Update task status
+		if result.ExitCode == 0 {
+			wf.MarkComplete([]string{task.ID})
+		}
+		// On failure, leave as in_progress for investigation
+	}()
+}
+
+// buildHeadlessPrompt constructs the prompt for the agent
 func buildHeadlessPrompt(task *client.Task) string {
 	var b strings.Builder
 
@@ -289,3 +289,4 @@ func buildHeadlessPrompt(task *client.Task) string {
 
 	return b.String()
 }
+

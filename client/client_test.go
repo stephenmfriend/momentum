@@ -523,11 +523,11 @@ func TestMoveTaskStatus(t *testing.T) {
 	expectedTask := Task{ID: "task-1", Title: "Task 1", Status: "done", ProjectID: "proj-1"}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut {
-			t.Errorf("expected PUT method, got %s", r.Method)
+		if r.Method != http.MethodPatch {
+			t.Errorf("expected PATCH method, got %s", r.Method)
 		}
-		if r.URL.Path != "/tasks/task-1/status" {
-			t.Errorf("expected path /tasks/task-1/status, got %s", r.URL.Path)
+		if r.URL.Path != "/api/tasks/task-1" {
+			t.Errorf("expected path /api/tasks/task-1, got %s", r.URL.Path)
 		}
 
 		var body map[string]string

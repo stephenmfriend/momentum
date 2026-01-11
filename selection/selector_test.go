@@ -434,9 +434,10 @@ func TestSelectNewestTodoAcrossAllProjects(t *testing.T) {
 
 func TestPrioritizeUnblockedOverBlocked(t *testing.T) {
 	tests := []struct {
-		name       string
-		tasks      []client.Task
-		expectedID string
+		name        string
+		tasks       []client.Task
+		expectedID  string
+		expectError bool
 	}{
 		{
 			name: "unblocked todo over blocked todo",
@@ -447,21 +448,22 @@ func TestPrioritizeUnblockedOverBlocked(t *testing.T) {
 			expectedID: "task-2",
 		},
 		{
-			name: "unblocked in_progress when no unblocked todos",
+			name: "fallback to unblocked non-todo when no unblocked todos exist",
 			tasks: []client.Task{
 				{ID: "task-1", Title: "Blocked Todo", Status: "todo", Blocked: true},
 				{ID: "task-2", Title: "Unblocked In Progress", Status: "in_progress", Blocked: false},
 			},
-			expectedID: "task-2",
+			expectedID:  "task-2",
+			expectError: false,
 		},
 		{
-			name: "blocked todo as fallback when all unblocked are non-todo",
+			name: "fallback to unblocked done when no unblocked todos exist",
 			tasks: []client.Task{
 				{ID: "task-1", Title: "Blocked Todo", Status: "todo", Blocked: true},
 				{ID: "task-2", Title: "Unblocked Done", Status: "done", Blocked: false},
 			},
-			// Unblocked tasks of any status come before blocked todos
-			expectedID: "task-2",
+			expectedID:  "task-2",
+			expectError: false,
 		},
 	}
 
@@ -477,11 +479,17 @@ func TestPrioritizeUnblockedOverBlocked(t *testing.T) {
 			selector := NewSelector(c, "proj-1", "", "")
 			task, err := selector.SelectTask()
 
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if task.ID != tt.expectedID {
-				t.Errorf("expected task ID %s, got %s", tt.expectedID, task.ID)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if task.ID != tt.expectedID {
+					t.Errorf("expected task ID %s, got %s", tt.expectedID, task.ID)
+				}
 			}
 		})
 	}
@@ -619,17 +627,17 @@ func TestFilterAndSortTasks(t *testing.T) {
 			expectedLength: 1,
 		},
 		{
-			name: "fall back to unblocked non-todos when no unblocked todos",
+			name: "fallback to unblocked non-todos when no unblocked todos exist",
 			tasks: []client.Task{
 				{ID: "task-1", Status: "in_progress", Blocked: false},
 				{ID: "task-2", Status: "done", Blocked: false},
 				{ID: "task-3", Status: "todo", Blocked: true},
 			},
-			expectedOrder:  []string{"task-2", "task-1"}, // Sorted by ID descending
+			expectedOrder:  []string{"task-2", "task-1"},
 			expectedLength: 2,
 		},
 		{
-			name: "fall back to blocked todos when no unblocked tasks",
+			name: "fallback to blocked todos when no unblocked tasks exist",
 			tasks: []client.Task{
 				{ID: "task-1", Status: "todo", Blocked: true},
 				{ID: "task-2", Status: "todo", Blocked: true},
@@ -638,7 +646,7 @@ func TestFilterAndSortTasks(t *testing.T) {
 			expectedLength: 2,
 		},
 		{
-			name: "last resort: any task",
+			name: "last resort: blocked non-todos",
 			tasks: []client.Task{
 				{ID: "task-1", Status: "done", Blocked: true},
 				{ID: "task-2", Status: "in_progress", Blocked: true},
@@ -693,7 +701,7 @@ func TestComplexSelectionScenario(t *testing.T) {
 	m.tasks = map[string][]client.Task{
 		"proj-1": {
 			{ID: "task-001", Title: "Old blocked", Status: "todo", EpicID: "epic-1", ProjectID: "proj-1", Blocked: true},
-			{ID: "task-002", Title: "Old in_progress", Status: "in_progress", EpicID: "epic-1", ProjectID: "proj-1", Blocked: false},
+			{ID: "task-002", Title: "Old unblocked todo", Status: "todo", EpicID: "epic-1", ProjectID: "proj-1", Blocked: false},
 		},
 		"proj-2": {
 			{ID: "task-100", Title: "Newer blocked", Status: "todo", EpicID: "epic-2", ProjectID: "proj-2", Blocked: true},
@@ -717,7 +725,7 @@ func TestComplexSelectionScenario(t *testing.T) {
 		t.Errorf("expected task-101, got %s", task1.ID)
 	}
 
-	// Test 2: Select from proj-1 only (should get task-002 as only unblocked task)
+	// Test 2: Select from proj-1 only (should get task-002 as only unblocked todo)
 	selector2 := NewSelector(c, "proj-1", "", "")
 	task2, err := selector2.SelectTask()
 	if err != nil {
@@ -727,7 +735,7 @@ func TestComplexSelectionScenario(t *testing.T) {
 		t.Errorf("expected task-002, got %s", task2.ID)
 	}
 
-	// Test 3: Select from proj-3 only (should get task-200 as only task)
+	// Test 3: Select from proj-3 only (falls back to unblocked non-todo)
 	selector3 := NewSelector(c, "proj-3", "", "")
 	task3, err := selector3.SelectTask()
 	if err != nil {
@@ -737,7 +745,7 @@ func TestComplexSelectionScenario(t *testing.T) {
 		t.Errorf("expected task-200, got %s", task3.ID)
 	}
 
-	// Test 4: Select specific task by ID
+	// Test 4: Select specific task by ID (direct lookup, any status)
 	selector4 := NewSelector(c, "", "", "task-001")
 	task4, err := selector4.SelectTask()
 	if err != nil {

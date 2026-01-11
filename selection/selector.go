@@ -186,23 +186,52 @@ func (s *Selector) selectBestTask(tasks []client.Task) (*client.Task, error) {
 	return &candidates[0], nil
 }
 
-// filterAndSortTasks filters tasks to only include unblocked todos
-// and sorts them by priority (newer first).
-// Only tasks with status "todo" and blocked=false are eligible.
+// filterAndSortTasks filters and sorts tasks by priority:
+// 1. Unblocked todos (blocked=false, status="todo")
+// 2. Unblocked non-todos (blocked=false, status!="todo")
+// 3. Blocked todos (blocked=true, status="todo")
+// 4. Any remaining tasks (last resort)
+// Within each priority level, tasks are sorted by ID descending (newer first).
 func filterAndSortTasks(tasks []client.Task) []client.Task {
-	var candidates []client.Task
+	var unblockedTodos []client.Task
+	var unblockedOther []client.Task
+	var blockedTodos []client.Task
+	var blockedOther []client.Task
 
-	// Only collect unblocked todo tasks - no fallbacks
 	for _, task := range tasks {
-		if !task.Blocked && task.Status == "todo" {
-			candidates = append(candidates, task)
+		switch {
+		case !task.Blocked && task.Status == "todo":
+			unblockedTodos = append(unblockedTodos, task)
+		case !task.Blocked:
+			unblockedOther = append(unblockedOther, task)
+		case task.Blocked && task.Status == "todo":
+			blockedTodos = append(blockedTodos, task)
+		default:
+			blockedOther = append(blockedOther, task)
 		}
 	}
 
-	// Sort by ID descending (assuming newer tasks have "larger" IDs)
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].ID > candidates[j].ID
-	})
+	// Sort each group by ID descending
+	sortByIDDesc := func(slice []client.Task) {
+		sort.Slice(slice, func(i, j int) bool {
+			return slice[i].ID > slice[j].ID
+		})
+	}
 
-	return candidates
+	sortByIDDesc(unblockedTodos)
+	sortByIDDesc(unblockedOther)
+	sortByIDDesc(blockedTodos)
+	sortByIDDesc(blockedOther)
+
+	// Return the first non-empty group in priority order
+	if len(unblockedTodos) > 0 {
+		return unblockedTodos
+	}
+	if len(unblockedOther) > 0 {
+		return unblockedOther
+	}
+	if len(blockedTodos) > 0 {
+		return blockedTodos
+	}
+	return blockedOther
 }

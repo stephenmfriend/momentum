@@ -43,6 +43,7 @@ type Epic struct {
 	Status    string   `json:"status"`
 	DependsOn []string `json:"depends_on,omitempty"`
 	ProjectID string   `json:"project_id"`
+	Auto      bool     `json:"auto,omitempty"`
 }
 
 // Task represents a Flux task within a project.
