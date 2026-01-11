@@ -15,22 +15,27 @@ var (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "momentum",
-	Short: "Momentum - A TUI client for Flux project management",
-	Long: `Momentum is a terminal user interface for interacting with the Flux
-project management system. It provides both interactive TUI mode and headless
-mode for automation and scripting.
+	Short: "Momentum - Headless agent runner for Flux project management",
+	Long: `Momentum is a headless agent runner for the Flux project management system.
+It watches for tasks and automatically executes them using Claude Code.
 
 Because once the board starts moving, it shouldn't stop.
 
 Examples:
-  # Start interactive TUI mode
-  momentum interactive
+  # Watch for tasks from a specific project
+  momentum --project myproject
 
-  # Run in headless mode with a specific task
-  momentum headless --project myproject --task task-123
+  # Watch for tasks from a specific epic
+  momentum --epic epic-456
+
+  # Work with a specific task
+  momentum --task task-789
 
   # Use a custom Flux server URL
-  momentum --base-url http://flux.example.com:3000 interactive`,
+  momentum --base-url http://flux.example.com:3000 --project myproject`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runHeadless()
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -42,6 +47,11 @@ func Execute() error {
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&baseURL, "base-url", "http://localhost:3000", "Flux server base URL")
+
+	// Task selection flags (on root command now)
+	rootCmd.Flags().StringVar(&taskID, "task", "", "Specific task ID to work with")
+	rootCmd.Flags().StringVar(&epicID, "epic", "", "Filter tasks by epic ID")
+	rootCmd.Flags().StringVar(&projectID, "project", "", "Filter tasks by project ID")
 }
 
 // GetBaseURL returns the configured base URL for the Flux server
