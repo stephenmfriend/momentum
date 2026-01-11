@@ -1,3 +1,13 @@
+## [1.0.2](https://github.com/sirsjg/momentum/compare/v1.0.1...v1.0.2) (2026-01-11)
+
+### Bug Fixes
+
+* enable semantic-release to push tags and commits ([506d40d](https://github.com/sirsjg/momentum/commit/506d40d5573549b26843a1c46bc82da0ac81e23c))
+
+### Build System
+
+* change token name ([e2040c9](https://github.com/sirsjg/momentum/commit/e2040c9fcd29c3e7eb709e539da2de57a1756c35))
+
 ## [1.0.1](https://github.com/sirsjg/momentum/compare/v1.0.0...v1.0.1) (2026-01-11)
 
 ### Bug Fixes
