@@ -29,4 +29,7 @@ go.work.sum
 .claude/
 
 # Built executable
-momentum
+/momentum
+
+# Version file (created by semantic-release)
+.version
