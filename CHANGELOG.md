@@ -1,3 +1,13 @@
+## [1.1.3](https://github.com/sirsjg/momentum/compare/v1.1.2...v1.1.3) (2026-01-12)
+
+### Bug Fixes
+
+* improves task list rendering and styling ([3e83ad5](https://github.com/sirsjg/momentum/commit/3e83ad53aa8bd65459e46b38cc2b3756bb79461f))
+
+### Documentation
+
+* prerequisites ([48acada](https://github.com/sirsjg/momentum/commit/48acada2b4ee2832214dd1f2b612c536c1d053f6))
+
 ## [1.1.2](https://github.com/sirsjg/momentum/compare/v1.1.1...v1.1.2) (2026-01-12)
 
 ### Bug Fixes
