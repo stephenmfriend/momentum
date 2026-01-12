@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -27,17 +29,19 @@ type sseEventData struct {
 
 // runningAgents tracks which tasks have active agents
 type runningAgents struct {
-	mu      sync.Mutex
-	tasks   map[string]bool
-	runners map[string]*agent.Runner
-	doneCh  chan string
+	mu            sync.Mutex
+	tasks         map[string]bool
+	runners       map[string]*agent.Runner
+	stoppedByUser map[string]bool
+	doneCh        chan string
 }
 
 func newRunningAgents() *runningAgents {
 	return &runningAgents{
-		tasks:   make(map[string]bool),
-		runners: make(map[string]*agent.Runner),
-		doneCh:  make(chan string, 100),
+		tasks:         make(map[string]bool),
+		runners:       make(map[string]*agent.Runner),
+		stoppedByUser: make(map[string]bool),
+		doneCh:        make(chan string, 100),
 	}
 }
 
@@ -59,10 +63,23 @@ func (r *runningAgents) markDone(taskID string) {
 	defer r.mu.Unlock()
 	delete(r.tasks, taskID)
 	delete(r.runners, taskID)
+	delete(r.stoppedByUser, taskID)
 	select {
 	case r.doneCh <- taskID:
 	default:
 	}
+}
+
+func (r *runningAgents) markStoppedByUser(taskID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stoppedByUser[taskID] = true
+}
+
+func (r *runningAgents) wasStoppedByUser(taskID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stoppedByUser[taskID]
 }
 
 func (r *runningAgents) cancelAll() {
@@ -103,6 +120,8 @@ var (
 
 // runHeadless executes the headless mode logic with TUI
 func runHeadless() error {
+	log.SetOutput(io.Discard)
+
 	mode, err := parseExecutionMode(executionMode)
 	if err != nil {
 		return err
@@ -113,7 +132,8 @@ func runHeadless() error {
 
 	// Create the TUI model
 	modeUpdates := make(chan ui.ExecutionMode, 10)
-	model := ui.NewModel(criteria, mode, modeUpdates)
+	stopUpdates := make(chan string, 10)
+	model := ui.NewModel(criteria, mode, modeUpdates, stopUpdates)
 
 	// Create the bubbletea program
 	p := tea.NewProgram(&model, tea.WithAltScreen())
@@ -125,7 +145,7 @@ func runHeadless() error {
 	agents := newRunningAgents()
 
 	// Start the background worker
-	go runWorker(ctx, p, agents, mode, modeUpdates)
+	go runWorker(ctx, p, agents, mode, modeUpdates, stopUpdates)
 
 	// Run the TUI
 	_, err = p.Run()
@@ -166,12 +186,13 @@ func parseExecutionMode(value string) (ui.ExecutionMode, error) {
 }
 
 // runWorker runs the background task selection and agent spawning
-func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode ui.ExecutionMode, modeUpdates <-chan ui.ExecutionMode) {
+func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode ui.ExecutionMode, modeUpdates <-chan ui.ExecutionMode, stopUpdates <-chan string) {
 	// Create the REST client
 	c := client.NewClient(GetBaseURL())
 
 	// Create workflow for status updates
 	wf := workflow.NewWorkflow(c)
+	wf.SetOutput(io.Discard)
 
 	// Create the selector
 	selector := selection.NewSelector(c, projectID, epicID, taskID)
@@ -183,6 +204,18 @@ func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode 
 
 	// Signal connected
 	p.Send(ui.ListenerConnectedMsg{})
+
+	// Process stop requests even when the main loop blocks waiting for SSE.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case taskID := <-stopUpdates:
+				agents.markStoppedByUser(taskID)
+			}
+		}
+	}()
 
 	pending := make([]*client.Task, 0)
 	queued := make(map[string]bool)
@@ -369,6 +402,9 @@ func spawnAgent(ctx context.Context, p *tea.Program, task *client.Task, wf *work
 	go func() {
 		result := <-runner.Done()
 
+		// Check if stopped by user before marking done (which clears the flag)
+		stoppedByUser := agents.wasStoppedByUser(task.ID)
+
 		// Mark agent as done
 		agents.markDone(task.ID)
 
@@ -378,10 +414,13 @@ func spawnAgent(ctx context.Context, p *tea.Program, task *client.Task, wf *work
 		})
 
 		// Update task status
-		if result.ExitCode == 0 {
+		if stoppedByUser {
+			// User stopped the agent, reset task to planning
+			wf.ResetToPlanning([]string{task.ID})
+		} else if result.ExitCode == 0 {
 			wf.MarkComplete([]string{task.ID})
 		}
-		// On failure, leave as in_progress for investigation
+		// On failure (not stopped by user), leave as in_progress for investigation
 	}()
 }
 

@@ -18,6 +18,10 @@ type Runner struct {
 	startTime  time.Time
 }
 
+type pidProvider interface {
+	PID() int
+}
+
 // NewRunner creates a new agent runner
 func NewRunner(agent Agent) *Runner {
 	return &Runner{
@@ -141,4 +145,15 @@ func (r *Runner) IsRunning() bool {
 // Agent returns the underlying agent
 func (r *Runner) Agent() Agent {
 	return r.agent
+}
+
+// PID returns the process ID for the running agent, or 0 if unavailable.
+func (r *Runner) PID() int {
+	if r == nil {
+		return 0
+	}
+	if provider, ok := r.agent.(pidProvider); ok {
+		return provider.PID()
+	}
+	return 0
 }

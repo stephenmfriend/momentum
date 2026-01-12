@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sirsjg/momentum/agent"
@@ -36,6 +37,7 @@ type AgentPanel struct {
 	Focused   bool
 	Closed    bool
 	Stopping  bool // Set when stop is requested but process hasn't exited yet
+	PID       int
 }
 
 // IsRunning returns whether the agent is still running
@@ -51,8 +53,12 @@ func (p *AgentPanel) IsFinished() bool {
 // Model is the main TUI model
 type Model struct {
 	// Dimensions
-	width  int
-	height int
+	width           int
+	height          int
+	consoleWidth    int
+	consoleHeight   int
+	listPanelHeight int
+	listBodyHeight  int
 
 	// Listener state
 	listening    bool
@@ -67,7 +73,13 @@ type Model struct {
 	// Agent panels
 	panels       []*AgentPanel
 	focusedPanel int
+	scrollIndex  int
 	nextPanelID  int
+
+	// List and detail view components
+	viewport      viewport.Model
+	consoleOpen   bool
+	progressFrame int
 
 	// Agent updates channel
 	agentUpdates chan AgentUpdate
@@ -77,21 +89,27 @@ type Model struct {
 	latestVersion   string
 
 	modeUpdates chan<- ExecutionMode
+	stopUpdates chan<- string // sends taskID when user stops an agent
 }
 
 // NewModel creates a new TUI model
-func NewModel(criteria string, mode ExecutionMode, modeUpdates chan<- ExecutionMode) Model {
+func NewModel(criteria string, mode ExecutionMode, modeUpdates chan<- ExecutionMode, stopUpdates chan<- string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(Purple)
+	s.Style = lipgloss.NewStyle().Foreground(GlowGreen)
+
+	// Initialize viewport for detail view
+	vp := viewport.New(0, 0)
 
 	return Model{
 		criteria:     criteria,
 		mode:         mode,
 		spinner:      s,
 		panels:       make([]*AgentPanel, 0),
+		viewport:     vp,
 		agentUpdates: make(chan AgentUpdate, 100),
 		modeUpdates:  modeUpdates,
+		stopUpdates:  stopUpdates,
 	}
 }
 
@@ -160,6 +178,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.updateLayoutDimensions()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -171,6 +190,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tickMsg:
+		m.progressFrame++
 		return m, tickCmd()
 
 	case ListenerConnectedMsg:
@@ -208,6 +228,11 @@ func (m *Model) addAgentPanel(taskID, taskTitle, agentName string, runner *agent
 	m.nextPanelID++
 	id := fmt.Sprintf("agent-%d", m.nextPanelID)
 
+	pid := 0
+	if runner != nil {
+		pid = runner.PID()
+	}
+
 	panel := &AgentPanel{
 		ID:        id,
 		TaskID:    taskID,
@@ -216,17 +241,22 @@ func (m *Model) addAgentPanel(taskID, taskTitle, agentName string, runner *agent
 		Runner:    runner,
 		Output:    make([]agent.OutputLine, 0),
 		StartTime: time.Now(),
-		Focused:   len(m.panels) == 0,
+		PID:       pid,
 	}
 
 	m.panels = append(m.panels, panel)
-	if panel.Focused {
-		m.focusedPanel = len(m.panels) - 1
+
+	// Auto-select first panel
+	if len(m.panels) == 1 {
+		m.focusedPanel = 0
 	}
+
+	m.clampSelection()
+	m.updateConsoleContent()
 }
 
 func (m *Model) appendAgentOutput(taskID string, line agent.OutputLine) {
-	for _, panel := range m.panels {
+	for i, panel := range m.panels {
 		if panel.TaskID == taskID {
 			// Parse JSON output to extract meaningful content
 			parsed := parseClaudeOutput(line.Text)
@@ -241,13 +271,10 @@ func (m *Model) appendAgentOutput(taskID string, line agent.OutputLine) {
 			}
 
 			panel.Output = append(panel.Output, parsedLine)
-			// Auto-scroll
-			visibleLines := m.getPanelHeight() - 4
-			if visibleLines < 1 {
-				visibleLines = 10
-			}
-			if len(panel.Output) > visibleLines {
-				panel.ScrollPos = len(panel.Output) - visibleLines
+
+			// Update viewport if this is the selected panel
+			if i == m.focusedPanel {
+				m.updateConsoleContent()
 			}
 			return
 		}
@@ -262,89 +289,82 @@ func (m *Model) completeAgent(taskID string, result agent.Result) {
 			panel.Runner = nil
 			m.taskCount++
 			m.lastTaskTime = time.Now()
+			m.clampSelection()
+			m.updateConsoleContent()
 			return
 		}
 	}
 }
 
 func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.consoleOpen {
+		switch msg.String() {
+		case "esc":
+			m.consoleOpen = false
+			m.updateLayoutDimensions()
+			return m, nil
+		case "up", "k", "down", "j", "pgup", "pgdown", "home", "end":
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		case "enter":
+			m.consoleOpen = false
+			m.updateLayoutDimensions()
+			return m, nil
+		}
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 
-	case "tab":
-		// Cycle through panels
+	case "enter":
 		if len(m.panels) > 0 {
-			// Clear current focus
-			if m.focusedPanel >= 0 && m.focusedPanel < len(m.panels) {
-				m.panels[m.focusedPanel].Focused = false
-			}
-			m.focusedPanel = (m.focusedPanel + 1) % len(m.panels)
-			m.panels[m.focusedPanel].Focused = true
-		}
-		return m, nil
-
-	case "shift+tab":
-		// Cycle backwards through panels
-		if len(m.panels) > 0 {
-			if m.focusedPanel >= 0 && m.focusedPanel < len(m.panels) {
-				m.panels[m.focusedPanel].Focused = false
-			}
-			m.focusedPanel = (m.focusedPanel - 1 + len(m.panels)) % len(m.panels)
-			m.panels[m.focusedPanel].Focused = true
+			m.consoleOpen = true
+			m.updateConsoleContent()
+			m.updateLayoutDimensions()
 		}
 		return m, nil
 
 	case "x", "c":
-		// Close focused panel if finished
+		// Close selected panel
 		if m.focusedPanel >= 0 && m.focusedPanel < len(m.panels) {
-			panel := m.panels[m.focusedPanel]
-			if panel.IsFinished() {
-				m.panels = append(m.panels[:m.focusedPanel], m.panels[m.focusedPanel+1:]...)
-				if m.focusedPanel >= len(m.panels) {
-					m.focusedPanel = len(m.panels) - 1
-				}
-				if m.focusedPanel >= 0 && m.focusedPanel < len(m.panels) {
-					m.panels[m.focusedPanel].Focused = true
-				}
-			}
+			m.panels = append(m.panels[:m.focusedPanel], m.panels[m.focusedPanel+1:]...)
+			m.clampSelection()
+			m.updateConsoleContent()
 		}
 		return m, nil
 
-	case "s", "esc":
-		// Stop focused panel's agent if running
+	case "s":
+		// Stop selected panel's agent if running
 		if m.focusedPanel >= 0 && m.focusedPanel < len(m.panels) {
 			panel := m.panels[m.focusedPanel]
 			if panel.IsRunning() && panel.Runner != nil && !panel.Stopping {
 				panel.Stopping = true
 				panel.Runner.Cancel()
+				if m.stopUpdates != nil {
+					select {
+					case m.stopUpdates <- panel.TaskID:
+					default:
+					}
+				}
 			}
 		}
 		return m, nil
 
 	case "up", "k":
-		// Scroll up in focused panel
-		if m.focusedPanel >= 0 && m.focusedPanel < len(m.panels) {
-			panel := m.panels[m.focusedPanel]
-			panel.ScrollPos -= 3
-			if panel.ScrollPos < 0 {
-				panel.ScrollPos = 0
-			}
+		if m.focusedPanel > 0 {
+			m.focusedPanel--
+			m.clampSelection()
+			m.updateConsoleContent()
 		}
 		return m, nil
 
 	case "down", "j":
-		// Scroll down in focused panel
-		if m.focusedPanel >= 0 && m.focusedPanel < len(m.panels) {
-			panel := m.panels[m.focusedPanel]
-			maxScroll := len(panel.Output) - (m.getPanelHeight() - 4)
-			if maxScroll < 0 {
-				maxScroll = 0
-			}
-			panel.ScrollPos += 3
-			if panel.ScrollPos > maxScroll {
-				panel.ScrollPos = maxScroll
-			}
+		if m.focusedPanel < len(m.panels)-1 {
+			m.focusedPanel++
+			m.clampSelection()
+			m.updateConsoleContent()
 		}
 		return m, nil
 
@@ -362,9 +382,156 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) getPanelHeight() int {
-	// Reserve space for header and help
-	return (m.height - 8) // Listener panel takes ~4 lines, help takes ~2
+func (m *Model) updateLayoutDimensions() {
+	headerHeight := lipgloss.Height(m.renderHeader())
+	helpHeight := lipgloss.Height(m.renderHelp())
+	gaps := 2
+	if m.consoleOpen {
+		gaps = 3
+	}
+
+	available := m.height - headerHeight - helpHeight - gaps
+	if available < 0 {
+		available = 0
+	}
+
+	listWidth := m.width - 4
+	if listWidth < 20 {
+		listWidth = 20
+	}
+
+	consoleHeight := 0
+	minListPanelHeight := 6
+	if available < minListPanelHeight {
+		minListPanelHeight = available
+	}
+	if m.consoleOpen {
+		consoleHeight = available / 3
+		if consoleHeight < 8 {
+			consoleHeight = 8
+		}
+		if consoleHeight > 14 {
+			consoleHeight = 14
+		}
+
+		maxConsole := available - minListPanelHeight
+		if maxConsole < 0 {
+			maxConsole = 0
+		}
+		if consoleHeight > maxConsole {
+			consoleHeight = maxConsole
+		}
+	}
+
+	listPanelHeight := available - consoleHeight
+	if listPanelHeight < minListPanelHeight {
+		listPanelHeight = minListPanelHeight
+		consoleHeight = available - listPanelHeight
+		if consoleHeight < 0 {
+			consoleHeight = 0
+		}
+	}
+
+	listBodyHeight := listPanelHeight - 3
+	if listBodyHeight < 1 {
+		if listPanelHeight == 0 {
+			listBodyHeight = 0
+		} else {
+			listBodyHeight = 1
+		}
+	}
+	m.listPanelHeight = listPanelHeight
+	m.listBodyHeight = listBodyHeight
+	m.clampSelection()
+
+	// Update console dimensions
+	m.consoleWidth = listWidth - 4
+	if m.consoleWidth < 40 {
+		m.consoleWidth = listWidth - 2
+	}
+	if m.consoleWidth > 120 {
+		m.consoleWidth = 120
+	}
+	m.consoleHeight = consoleHeight
+
+	if m.consoleHeight > 0 {
+		m.viewport.Width = m.consoleWidth - 4
+		m.viewport.Height = m.consoleHeight - 4
+	} else {
+		m.viewport.Width = listWidth - 4
+		m.viewport.Height = 1
+	}
+}
+
+func (m *Model) clampSelection() {
+	if len(m.panels) == 0 {
+		m.focusedPanel = -1
+		m.scrollIndex = 0
+		return
+	}
+
+	if m.focusedPanel < 0 {
+		m.focusedPanel = 0
+	}
+	if m.focusedPanel >= len(m.panels) {
+		m.focusedPanel = len(m.panels) - 1
+	}
+
+	maxItems := m.listMaxItems()
+	if maxItems <= 0 {
+		m.scrollIndex = m.focusedPanel
+		return
+	}
+
+	if m.focusedPanel < m.scrollIndex {
+		m.scrollIndex = m.focusedPanel
+	}
+	if m.focusedPanel >= m.scrollIndex+maxItems {
+		m.scrollIndex = m.focusedPanel - maxItems + 1
+	}
+
+	if maxStart := len(m.panels) - maxItems; maxStart >= 0 && m.scrollIndex > maxStart {
+		m.scrollIndex = maxStart
+	}
+	if m.scrollIndex < 0 {
+		m.scrollIndex = 0
+	}
+}
+
+func (m *Model) listMaxItems() int {
+	rowHeight := 2
+	gap := 1
+	if m.listBodyHeight <= 0 {
+		return 0
+	}
+	return (m.listBodyHeight + gap) / (rowHeight + gap)
+}
+
+func (m *Model) updateConsoleContent() {
+	if m.focusedPanel < 0 || m.focusedPanel >= len(m.panels) {
+		m.viewport.SetContent("")
+		return
+	}
+
+	panel := m.panels[m.focusedPanel]
+	var b strings.Builder
+
+	for _, line := range panel.Output {
+		text := line.Text
+		if line.IsStderr {
+			b.WriteString(StderrStyle.Render(text))
+		} else {
+			b.WriteString(OutputStyle.Render(text))
+		}
+		b.WriteString("\n")
+	}
+
+	m.viewport.SetContent(b.String())
+
+	// Auto-scroll to bottom if running
+	if panel.IsRunning() {
+		m.viewport.GotoBottom()
+	}
 }
 
 // View renders the UI
@@ -375,46 +542,26 @@ func (m *Model) View() string {
 
 	var b strings.Builder
 
-	// Header - ASCII art logo
-	logo := `
-                                     ██                  
-███▄███▄ ▄███▄ ███▄███▄ ▄█▀█▄ ████▄ ▀██▀▀ ██ ██ ███▄███▄ 
-██ ██ ██ ██ ██ ██ ██ ██ ██▄█▀ ██ ██  ██   ██ ██ ██ ██ ██ 
-██ ██ ██ ▀███▀ ██ ██ ██ ▀█▄▄▄ ██ ██  ██   ▀██▀█ ██ ██ ██ 
-`
-	b.WriteString(LogoStyle.Render(logo))
-	b.WriteString("\n")
-	b.WriteString(TaglineStyle.Render("keep the board moving"))
-	b.WriteString("  ")
-	b.WriteString(VersionStyle.Render("v" + version.Short()))
-	b.WriteString("\n\n")
-
-	// Listener panel
-	b.WriteString(m.renderListenerPanel())
+	// Header
+	b.WriteString(m.renderHeader())
 	b.WriteString("\n")
 
-	// Agent panels (tiled)
-	if len(m.panels) > 0 {
-		b.WriteString(m.renderAgentPanels())
+	b.WriteString(m.renderTaskListPanel())
+	b.WriteString("\n")
+
+	if m.consoleOpen {
+		b.WriteString(m.renderConsolePanel())
+		b.WriteString("\n")
 	}
-	b.WriteString("\n")
 
 	// Help
-	help := HelpKeyStyle.Render("Tab") + HelpStyle.Render(" focus  ") +
-		HelpKeyStyle.Render("j/k") + HelpStyle.Render(" scroll  ") +
-		HelpKeyStyle.Render("m") + HelpStyle.Render(" mode  ") +
-		HelpKeyStyle.Render("s") + HelpStyle.Render(" stop  ") +
-		HelpKeyStyle.Render("x") + HelpStyle.Render(" close  ") +
-		HelpKeyStyle.Render("q") + HelpStyle.Render(" quit")
-	b.WriteString(help)
+	b.WriteString(m.renderHelp())
 
-	// Update notification
-	if m.updateAvailable {
-		updateMsg := fmt.Sprintf("  Update available: v%s - run: brew upgrade momentum", m.latestVersion)
-		b.WriteString(UpdateAvailableStyle.Render(updateMsg))
+	view := b.String()
+	if m.height > 0 {
+		view = clampHeight(view, m.height)
 	}
-
-	return b.String()
+	return view
 }
 
 func (m *Model) renderListenerPanel() string {
@@ -442,120 +589,148 @@ func (m *Model) renderListenerPanel() string {
 	return PanelStyle.Width(m.width - 4).Render(content)
 }
 
-func (m *Model) renderAgentPanels() string {
-	if len(m.panels) == 0 {
+func (m *Model) renderHeader() string {
+	var b strings.Builder
+
+	logo := `
+                                     ██
+███▄███▄ ▄███▄ ███▄███▄ ▄█▀█▄ ████▄ ▀██▀▀ ██ ██ ███▄███▄
+██ ██ ██ ██ ██ ██ ██ ██ ██▄█▀ ██ ██  ██   ██ ██ ██ ██ ██
+██ ██ ██ ▀███▀ ██ ██ ██ ▀█▄▄▄ ██ ██  ██   ▀██▀█ ██ ██ ██
+`
+	b.WriteString(LogoStyle.Render(logo))
+	b.WriteString("\n")
+	b.WriteString(TaglineStyle.Render("keep the board moving"))
+	b.WriteString("  ")
+	b.WriteString(VersionStyle.Render("v" + version.Short()))
+	b.WriteString("\n\n")
+	b.WriteString(m.renderListenerPanel())
+
+	return b.String()
+}
+
+func (m *Model) renderHelp() string {
+	help := HelpKeyStyle.Render("enter") + HelpStyle.Render(" console  ") +
+		HelpKeyStyle.Render("j/k") + HelpStyle.Render(" select  ") +
+		HelpKeyStyle.Render("m") + HelpStyle.Render(" mode  ") +
+		HelpKeyStyle.Render("s") + HelpStyle.Render(" stop  ") +
+		HelpKeyStyle.Render("x") + HelpStyle.Render(" remove  ") +
+		HelpKeyStyle.Render("q") + HelpStyle.Render(" quit")
+
+	if m.updateAvailable {
+		updateMsg := fmt.Sprintf("  Update available: v%s - run: brew upgrade momentum", m.latestVersion)
+		help += UpdateAvailableStyle.Render(updateMsg)
+	}
+
+	return help
+}
+
+func (m *Model) renderTaskListPanel() string {
+	listWidth := m.width - 4
+	if listWidth < 20 {
+		listWidth = 20
+	}
+
+	contentWidth := listWidth - 2
+	header := m.renderListHeader(contentWidth)
+
+	var b strings.Builder
+	b.WriteString(header)
+	b.WriteString("\n")
+	b.WriteString(m.renderTaskListBody(contentWidth))
+
+	return PanelStyle.Width(listWidth).Height(m.listPanelHeight).Render(b.String())
+}
+
+func (m *Model) renderTaskListBody(width int) string {
+	if m.listBodyHeight <= 0 {
 		return ""
 	}
 
-	panelHeight := m.getPanelHeight()
+	var b strings.Builder
+	linesUsed := 0
 
-	// Calculate tile layout
-	numPanels := len(m.panels)
-	var cols int
-	switch {
-	case numPanels == 1:
-		cols = 1
-	case numPanels <= 4:
-		cols = 2
-	default:
-		cols = 3
+	if len(m.panels) == 0 {
+		empty := lipgloss.NewStyle().Foreground(Gray).Render("No running tasks yet...")
+		b.WriteString(empty)
+		linesUsed++
+		return padLines(b.String(), m.listBodyHeight-linesUsed)
 	}
 
-	panelWidth := (m.width - 4) / cols
-	if panelWidth < 40 {
-		panelWidth = m.width - 4
-		cols = 1
+	maxItems := m.listMaxItems()
+	if maxItems <= 0 {
+		return padLines("", m.listBodyHeight)
 	}
 
-	var rows []string
-	for i := 0; i < len(m.panels); i += cols {
-		var rowPanels []string
-		for j := 0; j < cols && i+j < len(m.panels); j++ {
-			panel := m.panels[i+j]
-			rendered := m.renderSinglePanel(panel, panelWidth-2, panelHeight)
-			rowPanels = append(rowPanels, rendered)
+	start := m.scrollIndex
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxItems
+	if end > len(m.panels) {
+		end = len(m.panels)
+	}
+
+	for i := start; i < end; i++ {
+		panel := m.panels[i]
+		line1 := renderProgressLine(panel, width, m.progressFrame)
+		line2 := renderMetaLine(panel, width)
+
+		if i == m.focusedPanel {
+			line1 = SelectedRowStyle.Width(width).Render(line1)
+			line2 = SelectedRowStyle.Width(width).Render(line2)
+		} else {
+			line1 = lipgloss.NewStyle().Width(width).Render(line1)
+			line2 = lipgloss.NewStyle().Width(width).Render(line2)
 		}
-		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, rowPanels...))
+
+		b.WriteString(line1)
+		b.WriteString("\n")
+		b.WriteString(line2)
+		linesUsed += 2
+
+		if i != end-1 && linesUsed < m.listBodyHeight {
+			b.WriteString("\n")
+			linesUsed++
+		}
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	return padLines(b.String(), m.listBodyHeight-linesUsed)
 }
 
-func (m *Model) renderSinglePanel(panel *AgentPanel, width, height int) string {
-	var b strings.Builder
+func (m *Model) renderListHeader(width int) string {
+	label := "PID"
+	task := "TASK"
+	name := "NAME"
+	timer := "TIME"
 
-	// Title with status
-	var elapsed time.Duration
-	if panel.IsFinished() && !panel.EndTime.IsZero() {
-		elapsed = panel.EndTime.Sub(panel.StartTime).Round(time.Second)
-	} else {
-		elapsed = time.Since(panel.StartTime).Round(time.Second)
+	base := fmt.Sprintf("%s  %s  %s", label, task, name)
+	padding := width - lipgloss.Width(base) - lipgloss.Width(timer)
+	if padding < 1 {
+		padding = 1
 	}
 
-	var statusStr string
-	if panel.Stopping && panel.IsRunning() {
-		statusStr = AgentStopping.Render(" [Stopping...]")
-	} else if panel.IsRunning() {
-		statusStr = AgentRunning.Render(" [Running]")
-	} else if panel.Result != nil {
-		if panel.Result.ExitCode == 0 {
-			statusStr = AgentCompleted.Render(" [Done]")
-		} else if panel.Stopping {
-			statusStr = AgentStopped.Render(" [Stopped]")
-		} else {
-			statusStr = AgentFailed.Render(fmt.Sprintf(" [Failed:%d]", panel.Result.ExitCode))
-		}
+	return ListHeaderStyle.Width(width).Render(base + strings.Repeat(" ", padding) + timer)
+}
+
+func (m *Model) renderConsolePanel() string {
+	if m.focusedPanel < 0 || m.focusedPanel >= len(m.panels) {
+		return ""
 	}
 
-	title := fmt.Sprintf("%s: %s %s (%s)", panel.AgentName, truncate(panel.TaskTitle, 20), statusStr, elapsed)
-	b.WriteString(TitleStyle.Width(width - 4).Render(title))
-	b.WriteString("\n")
+	panel := m.panels[m.focusedPanel]
+	statusText, statusStyle := statusForPanel(panel)
+	title := fmt.Sprintf("Console: %s · %s · %s", panel.TaskTitle, statusStyle.Render(statusText), formatDuration(panel))
 
-	// Output lines
-	visibleLines := height - 4
-	if visibleLines < 1 {
-		visibleLines = 1
+	content := ConsoleTitleStyle.Width(m.consoleWidth-2).Render(title) + "\n"
+	content += m.viewport.View()
+	content += "\n" + HelpStyle.Render("esc to close")
+
+	if m.consoleHeight <= 0 {
+		return ""
 	}
 
-	startIdx := panel.ScrollPos
-	endIdx := startIdx + visibleLines
-	if endIdx > len(panel.Output) {
-		endIdx = len(panel.Output)
-	}
-
-	for i := startIdx; i < endIdx; i++ {
-		line := panel.Output[i]
-		text := truncate(line.Text, width-6)
-		if line.IsStderr {
-			b.WriteString(StderrStyle.Render(text))
-		} else {
-			b.WriteString(OutputStyle.Render(text))
-		}
-		b.WriteString("\n")
-	}
-
-	// Pad remaining lines
-	for i := endIdx - startIdx; i < visibleLines; i++ {
-		b.WriteString("\n")
-	}
-
-	// Close button if finished
-	if panel.IsFinished() {
-		closeBtn := "[x] Close"
-		if panel.Focused {
-			b.WriteString(ButtonFocusedStyle.Render(closeBtn))
-		} else {
-			b.WriteString(ButtonStyle.Render(closeBtn))
-		}
-	}
-
-	// Choose panel style based on focus
-	style := PanelStyle
-	if panel.Focused {
-		style = FocusedPanelStyle
-	}
-
-	return style.Width(width).Height(height).Render(b.String())
+	return ConsoleOverlayStyle.Width(m.consoleWidth).Height(m.consoleHeight).Render(content)
 }
 
 func truncate(s string, maxLen int) string {
@@ -566,6 +741,154 @@ func truncate(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+func renderProgressLine(panel *AgentPanel, width int, frame int) string {
+	statusText, statusStyle := statusForPanel(panel)
+
+	barWidth := width - lipgloss.Width(statusText) - 1
+	if barWidth < 10 {
+		barWidth = 10
+	}
+	bar := renderProgressBar(barWidth, panel, frame)
+
+	return bar + " " + statusStyle.Render(statusText)
+}
+
+func renderMetaLine(panel *AgentPanel, width int) string {
+	pidText := "pid:-"
+	if panel.PID > 0 {
+		pidText = fmt.Sprintf("pid:%d", panel.PID)
+	}
+	taskIDText := fmt.Sprintf("task:%s", panel.TaskID)
+	elapsed := formatDuration(panel)
+	timeWidth := lipgloss.Width(elapsed)
+
+	baseWidth := lipgloss.Width(pidText) + 2 + lipgloss.Width(taskIDText) + 2
+	nameMax := width - baseWidth - timeWidth - 2
+	if nameMax < 8 {
+		nameMax = 8
+	}
+
+	nameText := truncate(panel.TaskTitle, nameMax)
+
+	baseRaw := fmt.Sprintf("%s  %s  %s", pidText, taskIDText, nameText)
+	padding := width - lipgloss.Width(baseRaw) - timeWidth
+	if padding < 1 {
+		padding = 1
+	}
+
+	return fmt.Sprintf(
+		"%s  %s  %s%s%s",
+		PidStyle.Render(pidText),
+		TaskIDStyle.Render(taskIDText),
+		TaskNameStyle.Render(nameText),
+		strings.Repeat(" ", padding),
+		TimeStyle.Render(elapsed),
+	)
+}
+
+func renderProgressBar(width int, panel *AgentPanel, frame int) string {
+	inner := width - 2
+	if inner < 3 {
+		inner = 3
+	}
+
+	if panel.IsFinished() {
+		fill := strings.Repeat("=", inner)
+		style := ProgressCompleteStyle
+		if panel.Result != nil && panel.Result.ExitCode != 0 {
+			style = ProgressFailedStyle
+		}
+		return "[" + style.Render(fill) + "]"
+	}
+
+	if panel.Stopping && panel.IsRunning() {
+		return "[" + ProgressTrackStyle.Render(strings.Repeat("-", inner)) + "]"
+	}
+
+	segLen := inner / 4
+	if segLen < 3 {
+		segLen = 3
+	}
+	if segLen > inner {
+		segLen = inner
+	}
+
+	pos := frame % (inner + segLen)
+	start := pos - segLen
+
+	var b strings.Builder
+	b.WriteString("[")
+	for i := 0; i < inner; i++ {
+		if i >= start && i < start+segLen {
+			b.WriteString(ProgressPulseStyle.Render("="))
+		} else {
+			b.WriteString(ProgressTrackStyle.Render("-"))
+		}
+	}
+	b.WriteString("]")
+	return b.String()
+}
+
+func statusForPanel(panel *AgentPanel) (string, lipgloss.Style) {
+	switch {
+	case panel.Stopping && panel.IsRunning():
+		return "stopping", AgentStopping
+	case panel.IsRunning():
+		return "running", AgentRunning
+	case panel.Result != nil:
+		if panel.Result.ExitCode == 0 {
+			return "complete 100%", AgentCompleted
+		}
+		if panel.Stopping {
+			return "stopped", AgentStopped
+		}
+		return fmt.Sprintf("failed %d", panel.Result.ExitCode), AgentFailed
+	default:
+		return "pending", StatusWaiting
+	}
+}
+
+func formatDuration(panel *AgentPanel) string {
+	var elapsed time.Duration
+	if panel.IsFinished() && !panel.EndTime.IsZero() {
+		elapsed = panel.EndTime.Sub(panel.StartTime)
+	} else {
+		elapsed = time.Since(panel.StartTime)
+	}
+	elapsed = elapsed.Round(time.Second)
+
+	h := int(elapsed.Hours())
+	m := int(elapsed.Minutes()) % 60
+	s := int(elapsed.Seconds()) % 60
+
+	if h > 0 {
+		return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+	}
+	return fmt.Sprintf("%02d:%02d", m, s)
+}
+
+func padLines(s string, count int) string {
+	if count <= 0 {
+		return s
+	}
+	return s + strings.Repeat("\n", count)
+}
+
+func clampHeight(s string, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+		return strings.Join(lines, "\n")
+	}
+	if len(lines) < height {
+		return s + strings.Repeat("\n", height-len(lines))
+	}
+	return s
 }
 
 // Public methods for external control
@@ -590,6 +913,11 @@ func (m *Model) AddAgent(taskID, taskTitle, agentName string, runner *agent.Runn
 	m.nextPanelID++
 	id := fmt.Sprintf("agent-%d", m.nextPanelID)
 
+	pid := 0
+	if runner != nil {
+		pid = runner.PID()
+	}
+
 	panel := &AgentPanel{
 		ID:        id,
 		TaskID:    taskID,
@@ -598,13 +926,18 @@ func (m *Model) AddAgent(taskID, taskTitle, agentName string, runner *agent.Runn
 		Runner:    runner,
 		Output:    make([]agent.OutputLine, 0),
 		StartTime: time.Now(),
-		Focused:   len(m.panels) == 0, // Focus first panel
+		PID:       pid,
 	}
 
 	m.panels = append(m.panels, panel)
-	if panel.Focused {
-		m.focusedPanel = len(m.panels) - 1
+
+	// Auto-select first panel
+	if len(m.panels) == 1 {
+		m.focusedPanel = 0
 	}
+
+	m.clampSelection()
+	m.updateConsoleContent()
 
 	return id
 }

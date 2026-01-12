@@ -4,16 +4,17 @@ import "github.com/charmbracelet/lipgloss"
 
 // Color palette
 var (
-	Purple    = lipgloss.Color("#7C3AED")
-	Cyan      = lipgloss.Color("#06B6D4")
-	Green     = lipgloss.Color("#10B981")
-	Amber     = lipgloss.Color("#F59E0B")
-	Orange    = lipgloss.Color("#F97316")
-	Red       = lipgloss.Color("#EF4444")
-	Gray      = lipgloss.Color("#6B7280")
-	DarkGray  = lipgloss.Color("#374151")
-	LightGray = lipgloss.Color("#9CA3AF")
-	White     = lipgloss.Color("#F9FAFB")
+	GlowGreen = lipgloss.Color("#7CFF8A")
+	Cyan      = lipgloss.Color("#5EE6FF")
+	Green     = lipgloss.Color("#44D27E")
+	Amber     = lipgloss.Color("#F4C857")
+	Orange    = lipgloss.Color("#F49B5A")
+	Red       = lipgloss.Color("#FF6B6B")
+	Gray      = lipgloss.Color("#8B949E")
+	DarkGray  = lipgloss.Color("#2D333B")
+	Charcoal  = lipgloss.Color("#1C2128")
+	LightGray = lipgloss.Color("#C9D1D9")
+	White     = lipgloss.Color("#F5F7FA")
 )
 
 // Common styles
@@ -21,7 +22,7 @@ var (
 	// Logo and header
 	LogoStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(Purple)
+			Foreground(GlowGreen)
 
 	TaglineStyle = lipgloss.NewStyle().
 			Foreground(Gray).
@@ -37,14 +38,22 @@ var (
 
 	FocusedPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(Purple)
+				BorderForeground(GlowGreen)
 
 	// Title styles
 	TitleStyle = lipgloss.NewStyle().
 			Foreground(White).
-			Background(Purple).
+			Background(Charcoal).
 			Padding(0, 1).
 			Bold(true)
+
+	ListHeaderStyle = lipgloss.NewStyle().
+			Foreground(Gray).
+			Bold(true)
+
+	SelectedRowStyle = lipgloss.NewStyle().
+				Background(Charcoal).
+				Foreground(White)
 
 	// Status styles
 	StatusConnected = lipgloss.NewStyle().
@@ -71,11 +80,39 @@ var (
 			Foreground(Gray)
 
 	AgentCompleted = lipgloss.NewStyle().
-			Foreground(Cyan)
+			Foreground(GlowGreen).
+			Bold(true)
 
 	AgentFailed = lipgloss.NewStyle().
 			Foreground(Red).
 			Bold(true)
+
+	ProgressTrackStyle = lipgloss.NewStyle().
+				Foreground(DarkGray)
+
+	ProgressPulseStyle = lipgloss.NewStyle().
+				Foreground(GlowGreen).
+				Bold(true)
+
+	ProgressCompleteStyle = lipgloss.NewStyle().
+				Foreground(Green).
+				Bold(true)
+
+	ProgressFailedStyle = lipgloss.NewStyle().
+				Foreground(Red).
+				Bold(true)
+
+	PidStyle = lipgloss.NewStyle().
+			Foreground(Gray)
+
+	TaskIDStyle = lipgloss.NewStyle().
+			Foreground(Cyan)
+
+	TaskNameStyle = lipgloss.NewStyle().
+			Foreground(White)
+
+	TimeStyle = lipgloss.NewStyle().
+			Foreground(LightGray)
 
 	// Output styles
 	OutputStyle = lipgloss.NewStyle().
@@ -92,7 +129,7 @@ var (
 
 	ButtonFocusedStyle = lipgloss.NewStyle().
 				Foreground(White).
-				Background(Purple).
+				Background(GlowGreen).
 				Padding(0, 1).
 				Bold(true)
 
@@ -106,5 +143,15 @@ var (
 	// Update notification
 	UpdateAvailableStyle = lipgloss.NewStyle().
 				Foreground(Orange).
+				Bold(true)
+
+	ConsoleOverlayStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(GlowGreen)
+
+	ConsoleTitleStyle = lipgloss.NewStyle().
+				Foreground(White).
+				Background(Charcoal).
+				Padding(0, 1).
 				Bold(true)
 )

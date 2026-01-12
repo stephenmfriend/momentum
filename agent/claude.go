@@ -176,3 +176,14 @@ func (c *ClaudeCode) IsRunning() bool {
 	defer c.mu.Unlock()
 	return c.running
 }
+
+// PID returns the process ID for the running agent, or 0 if unavailable.
+func (c *ClaudeCode) PID() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.cmd == nil || c.cmd.Process == nil {
+		return 0
+	}
+	return c.cmd.Process.Pid
+}
