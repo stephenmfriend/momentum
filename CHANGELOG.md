@@ -1,3 +1,9 @@
+## [1.1.4](https://github.com/sirsjg/momentum/compare/v1.1.3...v1.1.4) (2026-01-14)
+
+### Bug Fixes
+
+* clarifies mcp task comment usage ([9370d35](https://github.com/sirsjg/momentum/commit/9370d35d82f68c8ed73a2b01d226795334ceb6ad))
+
 ## [1.1.3](https://github.com/sirsjg/momentum/compare/v1.1.2...v1.1.3) (2026-01-12)
 
 ### Bug Fixes
