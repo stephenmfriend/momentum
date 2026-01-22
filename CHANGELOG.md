@@ -1,3 +1,13 @@
+## [1.2.0](https://github.com/sirsjg/momentum/compare/v1.1.4...v1.2.0) (2026-01-22)
+
+### Features
+
+* add Windows support ([d1bf53e](https://github.com/sirsjg/momentum/commit/d1bf53eb7d4db376dc8b0dca4dabdcc7f7cdeb1b))
+
+### Bug Fixes
+
+* correct process termination fallback behavior ([33cf485](https://github.com/sirsjg/momentum/commit/33cf485dcc414144a251d3319b3a0862600ff88e))
+
 ## [1.1.4](https://github.com/sirsjg/momentum/compare/v1.1.3...v1.1.4) (2026-01-14)
 
 ### Bug Fixes
