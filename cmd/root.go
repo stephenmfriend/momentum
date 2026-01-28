@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/sirsjg/momentum/version"
@@ -12,6 +14,7 @@ var (
 	// baseURL is the Flux server base URL
 	baseURL       string
 	executionMode string
+	workDir       string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -56,6 +59,7 @@ func init() {
 	rootCmd.Flags().StringVar(&epicID, "epic", "", "Filter tasks by epic ID")
 	rootCmd.Flags().StringVar(&projectID, "project", "", "Filter tasks by project ID")
 	rootCmd.Flags().StringVar(&executionMode, "execution-mode", "async", "Task execution mode: async or sync")
+	rootCmd.Flags().StringVar(&workDir, "workdir", "", "Working directory for agents (inherits CLAUDE.md)")
 }
 
 // GetBaseURL returns the configured base URL for the Flux server
@@ -67,4 +71,34 @@ func GetBaseURL() string {
 func exitWithError(msg string) {
 	fmt.Fprintln(os.Stderr, "Error:", msg)
 	os.Exit(1)
+}
+
+// GetWorkDir returns the current workdir setting
+func GetWorkDir() string {
+	return workDir
+}
+
+// SetWorkDir allows runtime updates from TUI
+func SetWorkDir(dir string) {
+	workDir = dir
+}
+
+// InitWorkDir sets initial workdir from CLI flag > env var > "."
+func InitWorkDir() {
+	if workDir != "" {
+		return // CLI flag already set
+	}
+	if dir := os.Getenv("MOMENTUM_WORKDIR"); dir != "" {
+		workDir = expandHome(dir)
+		return
+	}
+	workDir = "."
+}
+
+func expandHome(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, path[2:])
+	}
+	return path
 }

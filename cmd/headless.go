@@ -123,6 +123,9 @@ var (
 func runHeadless() error {
 	log.SetOutput(io.Discard)
 
+	// Initialize workdir from CLI flag > env var > "."
+	InitWorkDir()
+
 	mode, err := parseExecutionMode(executionMode)
 	if err != nil {
 		return err
@@ -134,7 +137,8 @@ func runHeadless() error {
 	// Create the TUI model
 	modeUpdates := make(chan ui.ExecutionMode, 10)
 	stopUpdates := make(chan string, 10)
-	model := ui.NewModel(criteria, mode, modeUpdates, stopUpdates)
+	workDirUpdates := make(chan string, 10)
+	model := ui.NewModel(criteria, mode, GetWorkDir(), modeUpdates, stopUpdates, workDirUpdates)
 
 	// Create the bubbletea program
 	p := tea.NewProgram(&model, tea.WithAltScreen())
@@ -146,7 +150,7 @@ func runHeadless() error {
 	agents := newRunningAgents()
 
 	// Start the background worker
-	go runWorker(ctx, p, agents, mode, modeUpdates, stopUpdates)
+	go runWorker(ctx, p, agents, mode, modeUpdates, stopUpdates, workDirUpdates)
 
 	// Run the TUI
 	_, err = p.Run()
@@ -187,7 +191,7 @@ func parseExecutionMode(value string) (ui.ExecutionMode, error) {
 }
 
 // runWorker runs the background task selection and agent spawning
-func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode ui.ExecutionMode, modeUpdates <-chan ui.ExecutionMode, stopUpdates <-chan string) {
+func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode ui.ExecutionMode, modeUpdates <-chan ui.ExecutionMode, stopUpdates <-chan string, workDirUpdates <-chan string) {
 	// Create the REST client
 	c := client.NewClient(GetBaseURL())
 
@@ -206,7 +210,7 @@ func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode 
 	// Signal connected
 	p.Send(ui.ListenerConnectedMsg{})
 
-	// Process stop requests even when the main loop blocks waiting for SSE.
+	// Process stop requests and workdir updates even when the main loop blocks waiting for SSE.
 	go func() {
 		for {
 			select {
@@ -214,6 +218,8 @@ func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode 
 				return
 			case taskID := <-stopUpdates:
 				agents.markStoppedByUser(taskID)
+			case newWorkDir := <-workDirUpdates:
+				SetWorkDir(newWorkDir)
 			}
 		}
 	}()
@@ -363,7 +369,7 @@ func waitForTaskWithSSE(ctx context.Context, sseEvents <-chan sse.Event, selecto
 func spawnAgent(ctx context.Context, p *tea.Program, task *client.Task, wf *workflow.Workflow, agents *runningAgents) {
 	// Create agent
 	ag := agent.NewClaudeCode(agent.Config{
-		WorkDir: ".",
+		WorkDir: GetWorkDir(),
 	})
 
 	runner := agent.NewRunner(ag)
