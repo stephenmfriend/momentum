@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -468,15 +469,10 @@ Task context:
 
 	// Guardrails (sorted by number, highest first = most critical)
 	if len(task.Guardrails) > 0 {
-		sorted := make([]client.Guardrail, len(task.Guardrails))
-		copy(sorted, task.Guardrails)
-		for i := 0; i < len(sorted)-1; i++ {
-			for j := i + 1; j < len(sorted); j++ {
-				if sorted[j].Number > sorted[i].Number {
-					sorted[i], sorted[j] = sorted[j], sorted[i]
-				}
-			}
-		}
+		sorted := slices.Clone(task.Guardrails)
+		slices.SortFunc(sorted, func(a, b client.Guardrail) int {
+			return b.Number - a.Number
+		})
 		b.WriteString("\nGuardrails:\n")
 		for _, g := range sorted {
 			b.WriteString(fmt.Sprintf("- %s\n", g.Text))
