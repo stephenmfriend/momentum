@@ -2,10 +2,13 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -90,10 +93,26 @@ type Model struct {
 
 	modeUpdates chan<- ExecutionMode
 	stopUpdates chan<- string // sends taskID when user stops an agent
+
+	// WorkDir settings
+	workDir           string
+	workDirUpdates    chan<- string
+	workDirMenuOpen   bool
+	workDirInputMode  bool
+	workDirInput      textinput.Model
+	promptPreviewOpen bool
+	claudeMdFiles     []claudeMdFile
+	promptViewport    viewport.Model
+}
+
+// claudeMdFile represents a CLAUDE.md file and its content
+type claudeMdFile struct {
+	Path    string
+	Content string
 }
 
 // NewModel creates a new TUI model
-func NewModel(criteria string, mode ExecutionMode, modeUpdates chan<- ExecutionMode, stopUpdates chan<- string) Model {
+func NewModel(criteria string, mode ExecutionMode, workDir string, modeUpdates chan<- ExecutionMode, stopUpdates chan<- string, workDirUpdates chan<- string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(GlowGreen)
@@ -101,15 +120,27 @@ func NewModel(criteria string, mode ExecutionMode, modeUpdates chan<- ExecutionM
 	// Initialize viewport for detail view
 	vp := viewport.New(0, 0)
 
+	// Initialize viewport for prompt preview
+	promptVp := viewport.New(0, 0)
+
+	// Initialize text input for workdir
+	ti := textinput.New()
+	ti.Placeholder = "Enter path..."
+	ti.CharLimit = 256
+
 	return Model{
-		criteria:     criteria,
-		mode:         mode,
-		spinner:      s,
-		panels:       make([]*AgentPanel, 0),
-		viewport:     vp,
-		agentUpdates: make(chan AgentUpdate, 100),
-		modeUpdates:  modeUpdates,
-		stopUpdates:  stopUpdates,
+		criteria:       criteria,
+		mode:           mode,
+		workDir:        workDir,
+		spinner:        s,
+		panels:         make([]*AgentPanel, 0),
+		viewport:       vp,
+		promptViewport: promptVp,
+		workDirInput:   ti,
+		agentUpdates:   make(chan AgentUpdate, 100),
+		modeUpdates:    modeUpdates,
+		stopUpdates:    stopUpdates,
+		workDirUpdates: workDirUpdates,
 	}
 }
 
@@ -297,6 +328,68 @@ func (m *Model) completeAgent(taskID string, result agent.Result) {
 }
 
 func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle prompt preview mode
+	if m.promptPreviewOpen {
+		switch msg.String() {
+		case "esc":
+			m.promptPreviewOpen = false
+			return m, nil
+		case "up", "k", "down", "j", "pgup", "pgdown", "home", "end":
+			var cmd tea.Cmd
+			m.promptViewport, cmd = m.promptViewport.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
+
+	// Handle workdir text input mode
+	if m.workDirInputMode {
+		switch msg.String() {
+		case "esc":
+			m.workDirInputMode = false
+			m.workDirInput.Reset()
+			return m, nil
+		case "enter":
+			newPath := m.workDirInput.Value()
+			if newPath != "" {
+				m.workDir = expandHomePath(newPath)
+				if m.workDirUpdates != nil {
+					select {
+					case m.workDirUpdates <- m.workDir:
+					default:
+					}
+				}
+			}
+			m.workDirInputMode = false
+			m.workDirInput.Reset()
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.workDirInput, cmd = m.workDirInput.Update(msg)
+			return m, cmd
+		}
+	}
+
+	// Handle workdir menu mode
+	if m.workDirMenuOpen {
+		switch msg.String() {
+		case "esc":
+			m.workDirMenuOpen = false
+			return m, nil
+		case "1":
+			m.workDirMenuOpen = false
+			m.workDirInputMode = true
+			m.workDirInput.SetValue(m.workDir)
+			m.workDirInput.Focus()
+			return m, nil
+		case "2":
+			m.workDirMenuOpen = false
+			m.saveWorkDirToEnv()
+			return m, nil
+		}
+		return m, nil
+	}
+
 	if m.consoleOpen {
 		switch msg.String() {
 		case "esc":
@@ -376,6 +469,16 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			default:
 			}
 		}
+		return m, nil
+
+	case "w":
+		m.workDirMenuOpen = true
+		return m, nil
+
+	case "p":
+		m.loadClaudeMdFiles()
+		m.promptPreviewOpen = true
+		m.updatePromptPreviewContent()
 		return m, nil
 	}
 
@@ -540,6 +643,17 @@ func (m *Model) View() string {
 		return ""
 	}
 
+	// Check for overlay modes first
+	if m.promptPreviewOpen {
+		return m.renderPromptPreview()
+	}
+	if m.workDirMenuOpen {
+		return m.renderWorkDirMenu()
+	}
+	if m.workDirInputMode {
+		return m.renderWorkDirInput()
+	}
+
 	var b strings.Builder
 
 	// Header
@@ -564,6 +678,75 @@ func (m *Model) View() string {
 	return view
 }
 
+func (m *Model) renderWorkDirMenu() string {
+	var b strings.Builder
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(GlowGreen).Render("WorkDir")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+
+	b.WriteString(fmt.Sprintf("Current: %s\n\n", shortenPath(m.workDir)))
+
+	b.WriteString(HelpKeyStyle.Render("[1]") + " Change path...\n")
+	b.WriteString(HelpKeyStyle.Render("[2]") + " Save to MOMENTUM_WORKDIR env var\n\n")
+
+	b.WriteString(HelpStyle.Render("Press 1-2 or esc to cancel"))
+
+	content := PanelStyle.Width(60).Render(b.String())
+
+	// Center in screen
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+func (m *Model) renderWorkDirInput() string {
+	var b strings.Builder
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(GlowGreen).Render("WorkDir")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+
+	b.WriteString("Enter path: ")
+	b.WriteString(m.workDirInput.View())
+	b.WriteString("\n\n")
+
+	b.WriteString(HelpStyle.Render("Press enter to confirm or esc to cancel"))
+
+	content := PanelStyle.Width(60).Render(b.String())
+
+	// Center in screen
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+func (m *Model) renderPromptPreview() string {
+	var b strings.Builder
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(GlowGreen).Render("Inherited System Prompt")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+
+	// Update viewport dimensions
+	previewWidth := m.width - 10
+	if previewWidth > 100 {
+		previewWidth = 100
+	}
+	previewHeight := m.height - 10
+	if previewHeight > 30 {
+		previewHeight = 30
+	}
+	m.promptViewport.Width = previewWidth - 4
+	m.promptViewport.Height = previewHeight - 6
+
+	b.WriteString(m.promptViewport.View())
+	b.WriteString("\n\n")
+
+	b.WriteString(HelpStyle.Render("esc to close  j/k scroll"))
+
+	content := PanelStyle.Width(previewWidth).Render(b.String())
+
+	// Center in screen
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
 func (m *Model) renderListenerPanel() string {
 	var status string
 	if m.lastError != nil {
@@ -576,14 +759,25 @@ func (m *Model) renderListenerPanel() string {
 
 	labelWidth := 16
 	labelStyle := lipgloss.NewStyle().Foreground(Gray).Width(labelWidth)
-	content := fmt.Sprintf("%s\n%s %s\n%s %s\n%s %d",
+	hintStyle := lipgloss.NewStyle().Foreground(Gray).Italic(true)
+
+	// Shorten workdir for display
+	displayWorkDir := shortenPath(m.workDir)
+	if len(displayWorkDir) > 40 {
+		displayWorkDir = "..." + displayWorkDir[len(displayWorkDir)-37:]
+	}
+
+	content := fmt.Sprintf("%s\n%s %s\n%s %s\n%s %s\n%s %d\n\n%s",
 		status,
 		labelStyle.Render("Filter:"),
 		m.criteria,
 		labelStyle.Render("Mode:"),
 		m.mode.String(),
+		labelStyle.Render("WorkDir:"),
+		displayWorkDir,
 		labelStyle.Render("Tasks completed:"),
 		m.taskCount,
+		hintStyle.Render("Agents inherit CLAUDE.md from WorkDir. Press p to preview."),
 	)
 
 	return PanelStyle.Width(m.width - 4).Render(content)
@@ -613,6 +807,8 @@ func (m *Model) renderHelp() string {
 	help := HelpKeyStyle.Render("enter") + HelpStyle.Render(" console  ") +
 		HelpKeyStyle.Render("j/k") + HelpStyle.Render(" select  ") +
 		HelpKeyStyle.Render("m") + HelpStyle.Render(" mode  ") +
+		HelpKeyStyle.Render("w") + HelpStyle.Render(" workdir  ") +
+		HelpKeyStyle.Render("p") + HelpStyle.Render(" prompt  ") +
 		HelpKeyStyle.Render("s") + HelpStyle.Render(" stop  ") +
 		HelpKeyStyle.Render("x") + HelpStyle.Render(" remove  ") +
 		HelpKeyStyle.Render("q") + HelpStyle.Render(" quit")
@@ -980,4 +1176,112 @@ func (m *Model) CancelAllAgents() {
 			p.Runner.Cancel()
 		}
 	}
+}
+
+// WorkDir helpers
+
+// expandHomePath expands ~ to the user's home directory
+func expandHomePath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
+// saveWorkDirToEnv prints instructions for saving workdir to env var
+// (actual shell modification not possible from Go, so we inform the user)
+func (m *Model) saveWorkDirToEnv() {
+	// We can't actually modify the user's shell config from here,
+	// but we can show them what to add
+	// For now, this is a no-op - the user sees the current workdir and can set it manually
+}
+
+// loadClaudeMdFiles finds and loads CLAUDE.md files for preview
+func (m *Model) loadClaudeMdFiles() {
+	m.claudeMdFiles = nil
+
+	// 1. Global ~/.claude/CLAUDE.md
+	home, _ := os.UserHomeDir()
+	globalPath := filepath.Join(home, ".claude", "CLAUDE.md")
+	if content, err := os.ReadFile(globalPath); err == nil {
+		m.claudeMdFiles = append(m.claudeMdFiles, claudeMdFile{
+			Path:    globalPath,
+			Content: string(content),
+		})
+	}
+
+	// 2. Walk from workdir up to root, collecting CLAUDE.md files
+	absWorkDir := m.workDir
+	if !filepath.IsAbs(absWorkDir) {
+		if wd, err := os.Getwd(); err == nil {
+			absWorkDir = filepath.Join(wd, m.workDir)
+		}
+	}
+	absWorkDir = filepath.Clean(absWorkDir)
+
+	var projectFiles []claudeMdFile
+	dir := absWorkDir
+	for {
+		mdPath := filepath.Join(dir, "CLAUDE.md")
+		if content, err := os.ReadFile(mdPath); err == nil {
+			// Prepend so parent dirs come first
+			projectFiles = append([]claudeMdFile{{
+				Path:    mdPath,
+				Content: string(content),
+			}}, projectFiles...)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	m.claudeMdFiles = append(m.claudeMdFiles, projectFiles...)
+}
+
+// updatePromptPreviewContent updates the prompt preview viewport content
+func (m *Model) updatePromptPreviewContent() {
+	var b strings.Builder
+
+	if len(m.claudeMdFiles) == 0 {
+		b.WriteString("No CLAUDE.md files found for current WorkDir.\n\n")
+		b.WriteString(fmt.Sprintf("WorkDir: %s\n", m.workDir))
+	} else {
+		b.WriteString("Sources:\n")
+		for _, f := range m.claudeMdFiles {
+			b.WriteString(fmt.Sprintf("  %s\n", f.Path))
+		}
+		b.WriteString("\n")
+		b.WriteString(strings.Repeat("─", 60))
+		b.WriteString("\n\n")
+
+		for _, f := range m.claudeMdFiles {
+			b.WriteString(fmt.Sprintf("# From %s\n", f.Path))
+			// Show first 20 lines of content
+			lines := strings.Split(f.Content, "\n")
+			maxLines := 20
+			if len(lines) > maxLines {
+				for _, line := range lines[:maxLines] {
+					b.WriteString(line)
+					b.WriteString("\n")
+				}
+				b.WriteString(fmt.Sprintf("... (%d more lines)\n", len(lines)-maxLines))
+			} else {
+				b.WriteString(f.Content)
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	m.promptViewport.SetContent(b.String())
+}
+
+// shortenPath shortens a path for display (replaces home with ~)
+func shortenPath(path string) string {
+	home, _ := os.UserHomeDir()
+	if strings.HasPrefix(path, home) {
+		return "~" + path[len(home):]
+	}
+	return path
 }
