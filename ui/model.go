@@ -277,9 +277,11 @@ func (m *Model) addAgentPanel(taskID, taskTitle, agentName string, runner *agent
 
 	m.panels = append(m.panels, panel)
 
-	// Auto-select first panel
+	// Auto-select first panel and open console
 	if len(m.panels) == 1 {
 		m.focusedPanel = 0
+		m.consoleOpen = true
+		m.updateLayoutDimensions()
 	}
 
 	m.clampSelection()
@@ -396,15 +398,13 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.consoleOpen = false
 			m.updateLayoutDimensions()
 			return m, nil
-		case "up", "k", "down", "j", "pgup", "pgdown", "home", "end":
+		case "pgup", "pgdown", "home", "end":
+			// Scroll within the output viewport
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
-		case "enter":
-			m.consoleOpen = false
-			m.updateLayoutDimensions()
-			return m, nil
 		}
+		// up/down/j/k now fall through to change focused panel
 	}
 
 	switch msg.String() {
@@ -412,8 +412,9 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "enter":
+		// Toggle console open/closed
 		if len(m.panels) > 0 {
-			m.consoleOpen = true
+			m.consoleOpen = !m.consoleOpen
 			m.updateConsoleContent()
 			m.updateLayoutDimensions()
 		}
@@ -547,13 +548,10 @@ func (m *Model) updateLayoutDimensions() {
 	m.listBodyHeight = listBodyHeight
 	m.clampSelection()
 
-	// Update console dimensions
-	m.consoleWidth = listWidth - 4
+	// Update console dimensions - use full width
+	m.consoleWidth = listWidth
 	if m.consoleWidth < 40 {
-		m.consoleWidth = listWidth - 2
-	}
-	if m.consoleWidth > 120 {
-		m.consoleWidth = 120
+		m.consoleWidth = 40
 	}
 	m.consoleHeight = consoleHeight
 
@@ -804,8 +802,8 @@ func (m *Model) renderHeader() string {
 }
 
 func (m *Model) renderHelp() string {
-	help := HelpKeyStyle.Render("enter") + HelpStyle.Render(" console  ") +
-		HelpKeyStyle.Render("j/k") + HelpStyle.Render(" select  ") +
+	help := HelpKeyStyle.Render("j/k") + HelpStyle.Render(" select  ") +
+		HelpKeyStyle.Render("pgup/dn") + HelpStyle.Render(" scroll  ") +
 		HelpKeyStyle.Render("m") + HelpStyle.Render(" mode  ") +
 		HelpKeyStyle.Render("w") + HelpStyle.Render(" workdir  ") +
 		HelpKeyStyle.Render("p") + HelpStyle.Render(" prompt  ") +
@@ -930,13 +928,19 @@ func (m *Model) renderConsolePanel() string {
 
 	content := ConsoleTitleStyle.Width(m.consoleWidth-2).Render(title) + "\n"
 	content += m.viewport.View()
-	content += "\n" + HelpStyle.Render("esc to close")
+	content += "\n" + HelpStyle.Render("pgup/pgdn scroll · esc close")
 
 	if m.consoleHeight <= 0 {
 		return ""
 	}
 
-	return ConsoleOverlayStyle.Width(m.consoleWidth).Height(m.consoleHeight).Render(content)
+	// Use red border for stopped or failed tasks
+	style := ConsoleOverlayStyle
+	if panel.Result != nil && (panel.Stopping || panel.Result.ExitCode != 0) {
+		style = ConsoleStoppedStyle
+	}
+
+	return style.Width(m.consoleWidth).Height(m.consoleHeight).Render(content)
 }
 
 func truncate(s string, maxLen int) string {
@@ -1137,9 +1141,11 @@ func (m *Model) AddAgent(taskID, taskTitle, agentName string, runner *agent.Runn
 
 	m.panels = append(m.panels, panel)
 
-	// Auto-select first panel
+	// Auto-select first panel and open console
 	if len(m.panels) == 1 {
 		m.focusedPanel = 0
+		m.consoleOpen = true
+		m.updateLayoutDimensions()
 	}
 
 	m.clampSelection()

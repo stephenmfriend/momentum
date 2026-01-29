@@ -149,6 +149,10 @@ var (
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(GlowGreen)
 
+	ConsoleStoppedStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(Red)
+
 	ConsoleTitleStyle = lipgloss.NewStyle().
 				Foreground(White).
 				Background(Charcoal).
