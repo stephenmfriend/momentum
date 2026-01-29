@@ -1,3 +1,9 @@
+## [1.3.1](https://github.com/sirsjg/momentum/compare/v1.3.0...v1.3.1) (2026-01-29)
+
+### Bug Fixes
+
+* improves console panel ux and styling ([f6eac40](https://github.com/sirsjg/momentum/commit/f6eac4013174a083ee97646fa4c891a271337e0e))
+
 ## [1.3.0](https://github.com/sirsjg/momentum/compare/v1.2.0...v1.3.0) (2026-01-28)
 
 ### Features
