@@ -15,15 +15,17 @@ import (
 
 // Workflow provides methods for managing task status transitions.
 type Workflow struct {
-	client *client.Client
-	out    io.Writer
+	client    *client.Client
+	out       io.Writer
+	agentName string
 }
 
 // NewWorkflow creates a new Workflow instance with the provided client.
 func NewWorkflow(client *client.Client) *Workflow {
 	return &Workflow{
-		client: client,
-		out:    os.Stdout,
+		client:    client,
+		out:       os.Stdout,
+		agentName: "claude",
 	}
 }
 
@@ -80,7 +82,7 @@ func (w *Workflow) updateTasksStatus(taskIDs []string, status, actionVerb string
 	for _, taskID := range taskIDs {
 		w.printf("%s task %s...\n", actionVerb, taskID)
 
-		task, err := w.client.MoveTaskStatus(taskID, status)
+		task, err := w.client.MoveTaskStatus(taskID, status, w.agentName)
 		if err != nil {
 			w.printf("  Failed to update task %s: %v\n", taskID, err)
 			failedTasks = append(failedTasks, taskID)

@@ -236,9 +236,11 @@ func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode 
 
 	startTask := func(task *client.Task) {
 		delete(queued, task.ID)
-		if err := wf.StartWorking([]string{task.ID}); err != nil {
-			p.Send(ui.ListenerErrorMsg{Err: err})
-			return
+		if !repoCfg.IsAgentMode() {
+			if err := wf.StartWorking([]string{task.ID}); err != nil {
+				p.Send(ui.ListenerErrorMsg{Err: err})
+				return
+			}
 		}
 		spawnAgent(ctx, p, task, wf, agents, repoCfg)
 	}
@@ -427,11 +429,12 @@ func spawnAgent(ctx context.Context, p *tea.Program, task *client.Task, wf *work
 			Result: result,
 		})
 
-		// Update task status
+		// Update task status based on mode:
+		// - orchestrator: momentum manages all transitions
+		// - agent: momentum only resets on user stop (safety net)
 		if stoppedByUser {
-			// User stopped the agent, reset task to planning
 			wf.ResetToPlanning([]string{task.ID})
-		} else if result.ExitCode == 0 {
+		} else if !repoCfg.IsAgentMode() && result.ExitCode == 0 {
 			wf.MarkComplete([]string{task.ID})
 		}
 		// On failure (not stopped by user), leave as in_progress for investigation

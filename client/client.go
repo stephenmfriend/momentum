@@ -82,6 +82,7 @@ type TaskUpdate struct {
 	Status    *string   `json:"status,omitempty"`
 	EpicID    *string   `json:"epic_id,omitempty"`
 	DependsOn *[]string `json:"depends_on,omitempty"`
+	AgentName *string   `json:"agent_name,omitempty"`
 }
 
 // TaskFilters contains optional filters for listing tasks.
@@ -317,9 +318,13 @@ func (c *Client) DeleteTask(taskID string) error {
 }
 
 // MoveTaskStatus is a shortcut method to quickly change a task's status.
-func (c *Client) MoveTaskStatus(taskID, status string) (*Task, error) {
+// An optional agentName identifies who performed the transition.
+func (c *Client) MoveTaskStatus(taskID, status string, agentName ...string) (*Task, error) {
 	updates := TaskUpdate{
 		Status: StringPtr(status),
+	}
+	if len(agentName) > 0 && agentName[0] != "" {
+		updates.AgentName = StringPtr(agentName[0])
 	}
 	return c.UpdateTask(taskID, updates)
 }
