@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sirsjg/momentum/client"
+	"github.com/sirsjg/momentum/config"
 	"github.com/sirsjg/momentum/sse"
 )
 
@@ -269,7 +270,7 @@ func TestBuildHeadlessPrompt_BasicTask(t *testing.T) {
 		Title: "Fix the bug",
 	}
 
-	result := buildHeadlessPrompt(task)
+	result := buildHeadlessPrompt(task, config.RepoConfig{})
 
 	if !contains(result, "Task ID: task-123") {
 		t.Error("prompt should contain task ID")
@@ -289,7 +290,7 @@ func TestBuildHeadlessPrompt_WithNotes(t *testing.T) {
 		Notes: "The bug is in the auth module. Check line 42.",
 	}
 
-	result := buildHeadlessPrompt(task)
+	result := buildHeadlessPrompt(task, config.RepoConfig{})
 
 	if !contains(result, "Details:") {
 		t.Error("prompt should contain Details section")
@@ -306,7 +307,7 @@ func TestBuildHeadlessPrompt_EmptyNotes(t *testing.T) {
 		Notes: "",
 	}
 
-	result := buildHeadlessPrompt(task)
+	result := buildHeadlessPrompt(task, config.RepoConfig{})
 
 	if contains(result, "Details:") {
 		t.Error("prompt should not contain Details section when notes are empty")
@@ -323,7 +324,7 @@ func TestBuildHeadlessPrompt_WithAcceptanceCriteria(t *testing.T) {
 		},
 	}
 
-	result := buildHeadlessPrompt(task)
+	result := buildHeadlessPrompt(task, config.RepoConfig{})
 
 	if !contains(result, "Acceptance Criteria:") {
 		t.Error("prompt should contain Acceptance Criteria section")
@@ -347,7 +348,7 @@ func TestBuildHeadlessPrompt_WithGuardrails(t *testing.T) {
 		},
 	}
 
-	result := buildHeadlessPrompt(task)
+	result := buildHeadlessPrompt(task, config.RepoConfig{})
 
 	if !contains(result, "Guardrails:") {
 		t.Error("prompt should contain Guardrails section")
@@ -370,10 +371,33 @@ func TestBuildHeadlessPrompt_EmptyAcceptanceCriteria(t *testing.T) {
 		AcceptanceCriteria: []string{},
 	}
 
-	result := buildHeadlessPrompt(task)
+	result := buildHeadlessPrompt(task, config.RepoConfig{})
 
 	if contains(result, "Acceptance Criteria:") {
 		t.Error("prompt should not contain Acceptance Criteria when empty")
+	}
+}
+
+func TestBuildHeadlessPrompt_CustomInstructions(t *testing.T) {
+	task := &client.Task{
+		ID:    "task-123",
+		Title: "Fix the bug",
+	}
+
+	cfg := config.RepoConfig{
+		Instructions: "Use the flux-task skill with the task ID.",
+	}
+
+	result := buildHeadlessPrompt(task, cfg)
+
+	if !contains(result, "Use the flux-task skill") {
+		t.Error("prompt should contain custom instructions")
+	}
+	if contains(result, "Goal: complete a single Flux task") {
+		t.Error("prompt should NOT contain default preamble when custom instructions are set")
+	}
+	if !contains(result, "Task ID: task-123") {
+		t.Error("prompt should still contain task context")
 	}
 }
 
@@ -384,7 +408,7 @@ func TestBuildHeadlessPrompt_EmptyGuardrails(t *testing.T) {
 		Guardrails: []client.Guardrail{},
 	}
 
-	result := buildHeadlessPrompt(task)
+	result := buildHeadlessPrompt(task, config.RepoConfig{})
 
 	if contains(result, "Guardrails:") {
 		t.Error("prompt should not contain Guardrails when empty")

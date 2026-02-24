@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sirsjg/momentum/agent"
 	"github.com/sirsjg/momentum/client"
+	"github.com/sirsjg/momentum/config"
 	"github.com/sirsjg/momentum/selection"
 	"github.com/sirsjg/momentum/sse"
 	"github.com/sirsjg/momentum/ui"
@@ -131,6 +132,12 @@ func runHeadless() error {
 		return err
 	}
 
+	// Load repo-specific config from workdir
+	repoCfg, err := config.Load(GetWorkDir())
+	if err != nil {
+		return fmt.Errorf("loading .momentum.yaml: %w", err)
+	}
+
 	// Build criteria string for display
 	criteria := buildCriteriaString()
 
@@ -150,7 +157,7 @@ func runHeadless() error {
 	agents := newRunningAgents()
 
 	// Start the background worker
-	go runWorker(ctx, p, agents, mode, modeUpdates, stopUpdates, workDirUpdates)
+	go runWorker(ctx, p, agents, mode, repoCfg, modeUpdates, stopUpdates, workDirUpdates)
 
 	// Run the TUI
 	_, err = p.Run()
@@ -191,7 +198,7 @@ func parseExecutionMode(value string) (ui.ExecutionMode, error) {
 }
 
 // runWorker runs the background task selection and agent spawning
-func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode ui.ExecutionMode, modeUpdates <-chan ui.ExecutionMode, stopUpdates <-chan string, workDirUpdates <-chan string) {
+func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode ui.ExecutionMode, repoCfg config.RepoConfig, modeUpdates <-chan ui.ExecutionMode, stopUpdates <-chan string, workDirUpdates <-chan string) {
 	// Create the REST client
 	c := client.NewClient(GetBaseURL())
 
@@ -233,7 +240,7 @@ func runWorker(ctx context.Context, p *tea.Program, agents *runningAgents, mode 
 			p.Send(ui.ListenerErrorMsg{Err: err})
 			return
 		}
-		spawnAgent(ctx, p, task, wf, agents)
+		spawnAgent(ctx, p, task, wf, agents, repoCfg)
 	}
 
 	queueTask := func(task *client.Task) {
@@ -366,7 +373,7 @@ func waitForTaskWithSSE(ctx context.Context, sseEvents <-chan sse.Event, selecto
 }
 
 // spawnAgent spawns a new agent for the given task
-func spawnAgent(ctx context.Context, p *tea.Program, task *client.Task, wf *workflow.Workflow, agents *runningAgents) {
+func spawnAgent(ctx context.Context, p *tea.Program, task *client.Task, wf *workflow.Workflow, agents *runningAgents, repoCfg config.RepoConfig) {
 	// Create agent
 	ag := agent.NewClaudeCode(agent.Config{
 		WorkDir: GetWorkDir(),
@@ -378,7 +385,7 @@ func spawnAgent(ctx context.Context, p *tea.Program, task *client.Task, wf *work
 	agents.markRunning(task.ID, runner)
 
 	// Build prompt
-	prompt := buildHeadlessPrompt(task)
+	prompt := buildHeadlessPrompt(task, repoCfg)
 
 	// Start the agent
 	if err := runner.Run(ctx, prompt); err != nil {
@@ -431,11 +438,8 @@ func spawnAgent(ctx context.Context, p *tea.Program, task *client.Task, wf *work
 	}()
 }
 
-// buildHeadlessPrompt constructs the prompt for the agent
-func buildHeadlessPrompt(task *client.Task) string {
-	var b strings.Builder
-
-	b.WriteString(`Goal: complete a single Flux task end-to-end, verify it works, and mark the task as done in Flux.
+// defaultPreamble is used when no repo-specific instructions are configured.
+const defaultPreamble = `Goal: complete a single Flux task end-to-end, verify it works, and mark the task as done in Flux.
 
 Process:
 1) Find the task to work on (use the given task ID/title, or select the highest-priority todo in the target project).
@@ -454,9 +458,22 @@ Constraints:
 - Be concise in explanations.
 
 If anything blocks completion, stop and report the blocker instead of guessing, and set the task status back to "planning", and add a comment explaining the issue.
+`
 
-Task context:
-`)
+// buildHeadlessPrompt constructs the prompt for the agent.
+// If the repo provides instructions via .momentum.yaml, those replace the
+// default preamble. Task context is always appended.
+func buildHeadlessPrompt(task *client.Task, repoCfg config.RepoConfig) string {
+	var b strings.Builder
+
+	if repoCfg.Instructions != "" {
+		b.WriteString(repoCfg.Instructions)
+		b.WriteString("\n")
+	} else {
+		b.WriteString(defaultPreamble)
+	}
+
+	b.WriteString("Task context:\n")
 
 	b.WriteString(fmt.Sprintf("- Task ID: %s\n", task.ID))
 	b.WriteString(fmt.Sprintf("- Task: %s\n", task.Title))
