@@ -22,9 +22,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/sirsjg/momentum/version.Version={{.Version}}
-      - -X github.com/sirsjg/momentum/version.Commit={{.Commit}}
-      - -X github.com/sirsjg/momentum/version.Date={{.Date}}
+      - -X github.com/stephenmfriend/momentum/version.Version={{.Version}}
+      - -X github.com/stephenmfriend/momentum/version.Commit={{.Commit}}
+      - -X github.com/stephenmfriend/momentum/version.Date={{.Date}}
 
 archives:
   - id: default
@@ -86,7 +86,7 @@ changelog:
 
 release:
   github:
-    owner: sirsjg
+    owner: stephenmfriend
     name: momentum
   prerelease: auto
   draft: false
@@ -95,11 +95,11 @@ release:
 brews:
   - name: momentum
     repository:
-      owner: sirsjg
+      owner: stephenmfriend
       name: homebrew-momentum
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: "https://github.com/sirsjg/momentum"
+    homepage: "https://github.com/stephenmfriend/momentum"
     description: "Lightweight CLI for managing Flux agents"
     license: "MIT"
     install: |

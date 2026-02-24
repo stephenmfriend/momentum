@@ -13,13 +13,13 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/sirsjg/momentum/agent"
-	"github.com/sirsjg/momentum/client"
-	"github.com/sirsjg/momentum/config"
-	"github.com/sirsjg/momentum/selection"
-	"github.com/sirsjg/momentum/sse"
-	"github.com/sirsjg/momentum/ui"
-	"github.com/sirsjg/momentum/workflow"
+	"github.com/stephenmfriend/momentum/agent"
+	"github.com/stephenmfriend/momentum/client"
+	"github.com/stephenmfriend/momentum/config"
+	"github.com/stephenmfriend/momentum/selection"
+	"github.com/stephenmfriend/momentum/sse"
+	"github.com/stephenmfriend/momentum/ui"
+	"github.com/stephenmfriend/momentum/workflow"
 )
 
 // sseEventData represents the structure of SSE event payloads

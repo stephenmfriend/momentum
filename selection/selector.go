@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/sirsjg/momentum/client"
+	"github.com/stephenmfriend/momentum/client"
 )
 
 // ErrNoTaskAvailable is returned when no suitable task can be found.

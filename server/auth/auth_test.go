@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirsjg/momentum/ratelimit"
+	"github.com/stephenmfriend/momentum/ratelimit"
 )
 
 func newTestHandler() *Handler {

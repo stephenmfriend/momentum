@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sirsjg/momentum/client"
+	"github.com/stephenmfriend/momentum/client"
 )
 
 // Workflow provides methods for managing task status transitions.

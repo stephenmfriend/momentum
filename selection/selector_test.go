@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sirsjg/momentum/client"
+	"github.com/stephenmfriend/momentum/client"
 )
 
 // mockServer creates a test server that responds with the given data.

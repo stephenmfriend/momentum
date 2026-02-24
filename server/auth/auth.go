@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/sirsjg/momentum/ratelimit"
+	"github.com/stephenmfriend/momentum/ratelimit"
 )
 
 // Handler provides HTTP handlers for authentication endpoints.

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/sirsjg/momentum/cmd"
+	"github.com/stephenmfriend/momentum/cmd"
 )
 
 func main() {

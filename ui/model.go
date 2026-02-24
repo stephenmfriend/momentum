@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/sirsjg/momentum/agent"
-	"github.com/sirsjg/momentum/version"
+	"github.com/stephenmfriend/momentum/agent"
+	"github.com/stephenmfriend/momentum/version"
 )
 
 // AgentUpdate represents an update from an agent

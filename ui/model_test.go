@@ -5,7 +5,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/sirsjg/momentum/agent"
+	"github.com/stephenmfriend/momentum/agent"
 )
 
 func TestNewModel(t *testing.T) {

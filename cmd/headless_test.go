@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirsjg/momentum/client"
-	"github.com/sirsjg/momentum/config"
-	"github.com/sirsjg/momentum/sse"
+	"github.com/stephenmfriend/momentum/client"
+	"github.com/stephenmfriend/momentum/config"
+	"github.com/stephenmfriend/momentum/sse"
 )
 
 func TestNewRunningAgents(t *testing.T) {

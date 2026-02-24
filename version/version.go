@@ -47,7 +47,7 @@ func CheckForUpdate() (latestVersion string, updateAvailable bool) {
 	}
 
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("https://api.github.com/repos/sirsjg/momentum/releases/latest")
+	resp, err := client.Get("https://api.github.com/repos/stephenmfriend/momentum/releases/latest")
 	if err != nil {
 		return "", false
 	}
